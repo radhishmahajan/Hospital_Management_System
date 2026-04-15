@@ -485,3 +485,4 @@ CREATE TABLE AuditLog (
     logged_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES Users(user_id)
 );
+use hospital;

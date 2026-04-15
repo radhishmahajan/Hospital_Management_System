@@ -197,10 +197,13 @@ def main(page: ft.Page):
             elif data['role'] == "Pharmacist":
                 pharm_query = """
                     INSERT INTO Pharmacist (
-                        user_id, first_name, last_name, phone, license_number, shift
+                        user_id, first_name, last_name, license_number, phone, shift
                     ) VALUES (%s, %s, %s, %s, %s, %s)
                 """
-                cursor.execute(pharm_query, (uid, data['fname'], data['lname'], data['phone'], data['lic'], data['shift']))
+                cursor.execute(
+                    pharm_query,
+                    (uid, data['fname'], data['lname'], data['lic'], data['phone'], data['shift'])
+                )
 
             conn.commit()
             return True
@@ -264,7 +267,12 @@ def main(page: ft.Page):
                     if rec_data: 
                         page.session.store.set("rec_id", rec_data[0]['receptionist_id'])
                     page.session.store.set("active_tab", "rec_overview")
-                
+                elif user['role_name'] == "Doctor":
+                    doc_query = "SELECT doctor_id FROM Doctor WHERE user_id=%s"
+                    doc_data = get_query_data(doc_query, (user['user_id'],))
+                    if doc_data:
+                        page.session.store.set("doctor_id", doc_data[0]['doctor_id'])
+                    page.session.store.set("active_tab", "doctor_dashboard")
                 else: 
                     page.session.store.set("active_tab", "unauthorized")
                 
@@ -465,7 +473,38 @@ def main(page: ft.Page):
                     style=ft.ButtonStyle(color="white70")
                 )
             ]
-            
+
+        elif role == "Doctor":
+            sidebar_bg = "#004D40"
+
+            sidebar_controls = [
+                ft.Text("DOCTOR PANEL", color="white", weight="bold", size=20),
+                ft.Divider(color="white24"),
+
+                ft.ListTile(title=ft.Text("OPD Queue", color="white"),
+                            on_click=lambda _: nav_to("doctor_dashboard")),
+
+                ft.ListTile(title=ft.Text("Admitted Patients", color="white"),
+                            on_click=lambda _: nav_to("doctor_ipd")),
+
+                ft.ListTile(title=ft.Text("Patient Medical Profile", color="white"),
+                            on_click=lambda _: nav_to("doctor_patient")),
+
+                ft.ListTile(title=ft.Text("Consultation", color="white"),
+                            on_click=lambda _: nav_to("doctor_consult")),
+
+                ft.ListTile(title=ft.Text("Prescriptions", color="white"),
+                            on_click=lambda _: nav_to("doctor_prescription")),
+
+                ft.ListTile(title=ft.Text("Lab Orders", color="white"),
+                            on_click=lambda _: nav_to("doctor_lab")),
+
+                ft.ListTile(title=ft.Text("Discharge", color="white"),
+                            on_click=lambda _: nav_to("doctor_discharge")),
+
+                ft.Container(expand=True),
+                ft.TextButton("Logout", on_click=logout_action)
+            ]    
         elif role == "Receptionist":
             sidebar_bg = ft.Colors.TEAL_900
             sidebar_controls = [
@@ -542,7 +581,7 @@ def main(page: ft.Page):
         }
 
         header_banner = ft.Container(
-            padding=ft.padding.only(bottom=20),
+            padding=ft.Padding.only(bottom=20),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN, 
                 controls=[
@@ -653,7 +692,743 @@ def main(page: ft.Page):
                     controls=[revenue_card, ward_card]
                 )
             )
+        elif tab == "doctor_dashboard":
+            doctor_id = page.session.store.get("doctor_id")
+            pid = page.session.store.get("selected_patient_id")
 
+            if pid:
+                p = get_query_data("SELECT first_name, last_name FROM Patient WHERE patient_id=%s", (pid,))
+                if p:
+                    content_controls.append(
+                        ft.Container(
+                            padding=10,
+                            bgcolor=ft.Colors.BLUE_50,
+                            content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
+                        )
+                    )
+
+            appts = get_query_data("""
+                SELECT a.appointment_id,a.patient_id, p.first_name, p.last_name,
+                    a.appointment_time, a.reason, a.status
+                FROM Appointment a
+                JOIN Patient p ON a.patient_id = p.patient_id
+                WHERE a.doctor_id = %s
+                ORDER BY a.appointment_date DESC
+            """, (doctor_id,))
+
+            rows = [
+                ft.DataRow(
+                    cells=[
+                        ft.DataCell(ft.Text(str(a['appointment_id']))),
+
+                        ft.DataCell(
+                            ft.TextButton(
+                                f"{a['first_name']} {a['last_name']}",
+                                on_click=lambda e, pid=a['patient_id']: (
+                                    page.session.store.set("selected_patient_id", pid),
+                                    nav_to("doctor_patient")
+                                )
+                            )
+                        ),
+
+                        ft.DataCell(ft.Text(str(a['appointment_time']))),
+                        ft.DataCell(ft.Text(a['reason'] or "")),
+                        ft.DataCell(ft.Text(a['status']))
+                    ]
+                )
+                for a in appts
+            ]
+
+            content_controls.append(
+                ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Text("ID")),
+                        ft.DataColumn(ft.Text("Patient")),
+                        ft.DataColumn(ft.Text("Time")),
+                        ft.DataColumn(ft.Text("Reason")),
+                        ft.DataColumn(ft.Text("Status")),
+                    ],
+                    rows=rows
+                )
+            )
+        elif tab == "doctor_ipd":
+            pid = page.session.store.get("selected_patient_id")
+
+            if pid:
+                p = get_query_data("SELECT first_name, last_name FROM Patient WHERE patient_id=%s", (pid,))
+                if p:
+                    content_controls.append(
+                        ft.Container(
+                            padding=10,
+                            bgcolor=ft.Colors.BLUE_50,
+                            content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
+                        )
+                    )
+            doctor_id = page.session.store.get("doctor_id")
+
+            data = get_query_data("""
+                SELECT a.admission_id, p.first_name, b.bed_number, w.ward_name, a.status
+                FROM Admission a
+                JOIN Patient p ON a.patient_id = p.patient_id
+                JOIN Bed b ON a.bed_id = b.bed_id
+                JOIN Room r ON b.room_id = r.room_id
+                JOIN Ward w ON r.ward_id = w.ward_id
+                WHERE a.doctor_id = %s
+            """, (doctor_id,))
+
+            content_controls.append(
+                ft.Column([
+                    ft.Text(f"{d['first_name']} | Bed {d['bed_number']} | {d['ward_name']} | {d['status']}")
+                    for d in data
+                ])
+            )
+        elif tab == "doctor_consult":
+
+            pid = page.session.store.get("selected_patient_id")
+
+            if not pid:
+                content_controls.append(ft.Text("Select patient first"))
+                return
+
+            # 🔹 Patient Banner
+            p = get_query_data("SELECT first_name, last_name FROM Patient WHERE patient_id=%s", (pid,))
+            if p:
+                content_controls.append(
+                    ft.Container(
+                        padding=10,
+                        bgcolor=ft.Colors.BLUE_50,
+                        content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
+                    )
+                )
+
+            # 🔹 Consultation Fields
+            chief = ft.TextField(label="Chief Complaint")
+            symptoms = ft.TextField(label="Symptoms")
+            diagnosis = ft.TextField(label="Diagnosis")
+
+            def save_consult(e):
+                doc_id = page.session.store.get("doctor_id")
+
+                execute_query("""
+                    INSERT INTO Consultation 
+                    (patient_id, doctor_id, chief_complaint, symptoms, diagnosis)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    pid,
+                    doc_id,
+                    chief.value,
+                    symptoms.value,
+                    diagnosis.value
+                ))
+
+                show_snack("Consultation Saved", ft.Colors.GREEN)
+
+            content_controls.append(
+                ft.Container(
+                    padding=20,
+                    content=ft.Column([
+                        ft.Text("Consultation Panel", size=20, weight="bold"),
+                        chief,
+                        symptoms,
+                        diagnosis,
+                        ft.FilledButton("Save Consultation", on_click=save_consult)
+                    ])
+                )
+            )
+           
+        elif tab == "doctor_discharge":
+            pid = page.session.store.get("selected_patient_id")
+
+            if pid:
+                p = get_query_data("SELECT first_name, last_name FROM Patient WHERE patient_id=%s", (pid,))
+                if p:
+                    content_controls.append(
+                        ft.Container(
+                            padding=10,
+                            bgcolor=ft.Colors.BLUE_50,
+                            content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
+                        )
+                    )
+            admission_id = ft.TextField(label="Admission ID")
+            notes = ft.TextField(label="Discharge Notes")
+
+            def discharge(e):
+                conn = get_db_connection()
+                cursor = conn.cursor()
+
+                # ✅ STEP 1: CHECK BILL FIRST
+                cursor.execute("""
+                SELECT due_amount FROM Invoice WHERE admission_id=%s
+                """, (admission_id.value,))
+
+                data = cursor.fetchone()
+
+                if data and float(data[0]) > 0:
+                    show_snack("Clear pending bill before discharge", ft.Colors.RED)
+                    cursor.close()
+                    conn.close()
+                    return
+
+                # ✅ STEP 2: ALLOW DISCHARGE
+                cursor.execute("""
+                UPDATE Admission
+                SET status='Discharged',
+                    discharge_date=NOW(),
+                    discharge_notes=%s
+                WHERE admission_id=%s
+                """, (notes.value, admission_id.value))
+
+                conn.commit()
+                cursor.close()
+                conn.close()
+
+                show_snack("Patient discharged successfully", ft.Colors.GREEN)
+
+            content_controls.append(
+                ft.Column([
+                    admission_id,
+                    notes,
+                    ft.FilledButton("Discharge Patient", on_click=discharge)
+                ])
+            ) 
+        elif tab == "doctor_patient":
+
+            pid = page.session.store.get("selected_patient_id")
+
+            if not pid:
+                content_controls.append(ft.Text("No patient selected"))
+                return
+
+            # 🔹 Patient banner
+            p_basic = get_query_data(
+                "SELECT first_name, last_name FROM Patient WHERE patient_id=%s",
+                (pid,)
+            )
+
+            if p_basic:
+                content_controls.append(
+                    ft.Container(
+                        padding=10,
+                        bgcolor=ft.Colors.BLUE_50,
+                        content=ft.Text(f"Current Patient: {p_basic[0]['first_name']} {p_basic[0]['last_name']}")
+                    )
+                )
+
+            # 🔹 Full data
+            patient = get_query_data("SELECT * FROM Patient WHERE patient_id=%s", (pid,))
+            vitals = get_query_data("SELECT * FROM VitalSigns WHERE patient_id=%s ORDER BY recorded_at DESC", (pid,))
+            history = get_query_data("SELECT * FROM MedicalHistory WHERE patient_id=%s", (pid,))
+            allergies = get_query_data("SELECT * FROM Allergy WHERE patient_id=%s", (pid,))
+
+            if not patient:
+                content_controls.append(ft.Text("Patient not found"))
+                return
+
+            p = patient[0]
+
+            # 🔥 IMPORTANT: Create lists separately (fix for Flet crash)
+            vitals_list = [
+                ft.Text(f"{v.get('temperature')} | {v.get('blood_pressure')} | {v.get('heart_rate')}")
+                for v in vitals
+            ]
+
+            history_list = [
+                ft.Text(h.get('condition'))
+                for h in history
+            ]
+
+            allergy_list = [
+                ft.Text(a.get('allergen'))
+                for a in allergies
+            ]
+
+            # 🔹 Tabs (safe structure)
+            # tabs = ft.Tabs(
+            #     tabs=[
+            #         ft.Tab(
+            #             label="Vitals",
+            #             content=ft.Column(vitals_list)
+            #         ),
+            #         ft.Tab(
+            #             label="History",
+            #             content=ft.Column(history_list)
+            #         ),
+            #         ft.Tab(
+            #             label="Allergies",
+            #             content=ft.Column(allergy_list)
+            #         )
+            #     ]
+            # )
+            # 🔹 Vitals Section
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Vitals", size=18, weight="bold"),
+                        *[
+                            ft.Text(f"{v.get('temperature')} | {v.get('blood_pressure')} | {v.get('heart_rate')}")
+                            for v in vitals
+                        ]
+                    ])
+                )
+            )
+
+            # 🔹 History Section
+            # content_controls.append(
+            #     ft.Container(
+            #         padding=10,
+            #         content=ft.Column([
+            #             ft.Text("Medical History", size=18, weight="bold"),
+            #             *[
+            #                 ft.Text(h.get('condition'))
+            #                 for h in history
+            #             ]
+            #         ])
+            #     )
+            # )
+
+            # 🔹 Allergy Section
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Allergies", size=18, weight="bold"),
+                        *[
+                            ft.Text(a.get('allergen'))
+                            for a in allergies
+                        ]
+                    ])
+                )
+            )
+            # 🔹 Main UI
+            content_controls.append(
+                ft.Column([
+                    ft.Text(f"{p['first_name']} {p['last_name']}", size=24, weight="bold"),
+                    ft.Text(f"Blood Group: {p['blood_group']} | Phone: {p['phone']}"),
+                    
+                    ft.Text(f"Address: {p['address']}")
+
+                ])
+            )
+
+            # 🔹 Add vitals form
+            
+            # 🔹 Prepare history widgets
+            history_widgets = []
+
+            if history:
+                for h in history:
+                    history_widgets.append(
+                        ft.Text(
+                            f"{h['condition_name']} | {h['status']} | {h['diagnosed_date']}\n{h['notes']}"
+                        )
+                    )
+            else:
+                history_widgets.append(ft.Text("No medical history available"))
+
+            # 🔹 Display
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Medical History", size=18, weight="bold"),
+                        *history_widgets
+                    ])
+                )
+            )
+            # 🔹 Add Medical History Form
+            condition_name = ft.TextField(label="Condition Name")
+            diagnosed_date = ft.TextField(label="Diagnosed Date (YYYY-MM-DD)")
+            status = ft.Dropdown(
+                label="Status",
+                options=[
+                    ft.dropdown.Option("Active"),
+                    ft.dropdown.Option("Resolved"),
+                    ft.dropdown.Option("Chronic")
+                ]
+            )
+            notes = ft.TextField(label="Notes")
+
+            def save_history(e):
+                pid = page.session.store.get("selected_patient_id")
+
+                if not pid:
+                    show_snack("Select patient first", ft.Colors.RED)
+                    return
+
+                execute_query("""
+                    INSERT INTO MedicalHistory 
+                    (patient_id, condition_name, diagnosed_date, status, notes)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    pid,
+                    condition_name.value,
+                    diagnosed_date.value,
+                    status.value,
+                    notes.value
+                ))
+
+                show_snack("Medical History Added", ft.Colors.GREEN)
+                nav_to("doctor_patient")
+                
+                
+                content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Add Medical History", weight="bold"),
+                        condition_name,
+                        diagnosed_date,
+                        status,
+                        notes,
+                        ft.FilledButton("Save", on_click=save_history)
+                    ])
+                )
+            )  # refresh
+            temp = ft.TextField(label="Temperature")
+            bp = ft.TextField(label="Blood Pressure")
+            pulse = ft.TextField(label="Pulse Rate")
+            resp = ft.TextField(label="Respiratory Rate")
+            spo2 = ft.TextField(label="Oxygen Saturation")
+            weight = ft.TextField(label="Weight")
+            height = ft.TextField(label="Height")
+            sugar = ft.TextField(label="Blood Sugar")
+            notes = ft.TextField(label="Notes")
+            
+
+            def save_vitals(e):
+                pid = page.session.store.get("selected_patient_id")
+                doc_id = page.session.store.get("doctor_id")
+
+                execute_query("""
+                    INSERT INTO VitalSigns 
+                    (patient_id, recorded_by, temperature, blood_pressure, pulse_rate,
+                    respiratory_rate, oxygen_saturation, weight, height, blood_sugar, notes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    pid, doc_id,
+                    temp.value, bp.value, pulse.value,
+                    resp.value, spo2.value,
+                    weight.value, height.value,
+                    sugar.value, notes.value
+                ))
+
+                show_snack("Vitals Saved", ft.Colors.GREEN)
+                nav_to("doctor_patient")
+            content_controls.append(
+            ft.Container(
+                padding=10,
+                content=ft.Column([
+                    ft.Text("Add Vitals", size=18, weight="bold"),
+
+                    temp,
+                    bp,
+                    pulse,     # ✅ fixed
+                    resp,
+                    spo2,
+                    weight,
+                    height,
+                    sugar,
+                    notes,
+
+                    ft.FilledButton("Save Vitals", on_click=save_vitals)
+                ])
+            )
+        )
+            
+        elif tab == "doctor_prescription":
+            pid = page.session.store.get("selected_patient_id")
+            # 🔹 FETCH PRESCRIPTIONS
+            prescriptions = get_query_data("""
+                SELECT 
+                    p.prescription_id,
+                    m.medicine_name,
+                    pi.dosage,
+                    pi.frequency,
+                    pi.duration_days,
+                    p.prescribed_at
+                FROM Prescription p
+                JOIN PrescriptionItem pi ON p.prescription_id = pi.prescription_id
+                JOIN Medicine m ON pi.medicine_id = m.medicine_id
+                WHERE p.patient_id = %s
+                ORDER BY p.prescribed_at DESC
+            """, (pid,))
+
+            # 🔹 Patient Banner
+            if pid:
+                patient_data = get_query_data(
+                    "SELECT first_name, last_name FROM Patient WHERE patient_id=%s",
+                    (pid,)
+                )
+                if patient_data:
+                    content_controls.append(
+                        ft.Container(
+                            padding=10,
+                            bgcolor=ft.Colors.BLUE_50,
+                            content=ft.Text(
+                                f"Current Patient: {patient_data[0]['first_name']} {patient_data[0]['last_name']}"
+                            )
+                        )
+                    )
+
+            # 🔹 Prepare prescription list safely
+            prescription_widgets = []
+
+            if prescriptions:
+                for item in prescriptions:
+                    prescription_widgets.append(
+                        ft.Text(
+                            f"{item['medicine_name']} | {item['dosage']} | {item['frequency']} | {item['duration_days']} days\n 📅Prescribed on: {item['prescribed_at']}"
+                        )
+                    )
+            else:
+                prescription_widgets.append(
+                    ft.Text("No prescriptions found")
+                )
+
+            # 🔹 Display UI
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Previous Prescriptions", size=18, weight="bold"),
+                        *prescription_widgets
+                    ])
+                )
+            )        
+
+            meds = get_query_data("SELECT medicine_id, medicine_name FROM Medicine")
+            print(meds)
+            if not meds:
+                content_controls.append(ft.Text("No medicines available"))
+
+            med_dropdown = ft.Dropdown(
+                label="Select Medicine",
+                options=[ft.dropdown.Option(key=str(m['medicine_id']), text=m['medicine_name']) for m in meds]
+            )
+
+            dose = ft.TextField(label="Dosage")
+            freq = ft.TextField(label="Frequency (e.g. 2 times/day)")   # ✅ NEW
+            duration = ft.TextField(label="Duration (days)")            # renamed meaning
+
+            def prescribe(e):
+                pid = page.session.store.get("selected_patient_id")
+                doc_id = page.session.store.get("doctor_id")
+
+                if not pid:
+                    show_snack("Select patient first", ft.Colors.RED)
+                    return
+
+                conn = get_db_connection()
+                cursor = conn.cursor()
+
+                # 🔹 create prescription (with notes + valid_till)
+                cursor.execute("""
+                    INSERT INTO Prescription (patient_id, doctor_id, notes, valid_till)
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    pid,
+                    doc_id,
+                    "General prescription",   # you can later make TextField
+                    None
+                ))
+
+                pres_id = cursor.lastrowid
+
+                # 🔹 add medicine item
+                cursor.execute("""
+                    INSERT INTO PrescriptionItem 
+                    (prescription_id, medicine_id, dosage, frequency, duration_days)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    pres_id,
+                    med_dropdown.value,
+                    dose.value,
+                    freq.value,
+                    duration.value
+                ))
+
+                conn.commit()
+                cursor.close()
+                conn.close()
+
+                show_snack("Prescription Added", ft.Colors.GREEN)
+                nav_to("doctor_prescription")   # 🔥 refresh   # 🔥 refresh
+
+            content_controls.append(
+                ft.Container(
+                    expand=True,
+                    padding=20,
+                    content=ft.Column(
+                        spacing=15,
+                        controls=[
+                            ft.Text("Prescription Panel", size=20, weight="bold"),
+
+                            med_dropdown,
+                            dose,
+                            freq,
+                            duration,
+
+                            ft.FilledButton("Add Prescription", on_click=prescribe)
+                        ]
+                    )
+                )
+            )
+                   
+        elif tab == "doctor_lab":
+
+            pid = page.session.store.get("selected_patient_id")
+            doc_id = page.session.store.get("doctor_id")
+
+            if not pid:
+                content_controls.append(ft.Text("Select patient first"))
+                return
+
+            # 🔹 Patient Banner
+            # 🔹 Patient Banner
+            patient_data = get_query_data(
+                "SELECT first_name, last_name FROM Patient WHERE patient_id=%s",
+                (pid,)
+            )
+
+            if patient_data:
+                content_controls.append(
+                    ft.Container(
+                        padding=10,
+                        bgcolor=ft.Colors.BLUE_50,
+                        content=ft.Text(
+                            f"Current Patient: {patient_data[0]['first_name']} {patient_data[0]['last_name']}"
+                        )
+                    )
+                )
+
+            # 🔹 Fetch Lab Records
+            lab_records = get_query_data("""
+                SELECT l.test_name, lo.ordered_at
+                FROM LabOrder lo
+                JOIN LabOrderItem li ON lo.order_id = li.order_id
+                JOIN LabTest l ON li.test_id = l.test_id
+                WHERE lo.patient_id = %s
+                ORDER BY lo.ordered_at DESC                         
+            """, (pid,))
+
+            # 🔹 Prepare Lab Record Widgets
+            lab_widgets = []
+
+            if lab_records:
+                for r in lab_records:
+                    lab_widgets.append(
+                        ft.Text(f"{r['test_name']} | 📅 Ordered on {r['ordered_at']}")
+                    )
+            else:
+                lab_widgets.append(ft.Text("No lab records found"))
+
+            # 🔹 Display Lab Records
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Lab Records", size=18, weight="bold"),
+                        *lab_widgets
+                    ])
+                )
+            )
+
+            # 🔹 Fetch Lab Results
+            results = get_query_data("""
+                SELECT lr.result_value, lr.unit, lr.status, lt.test_name
+                FROM LabResult lr
+                JOIN LabOrderItem loi ON lr.order_item_id = loi.order_item_id
+                JOIN LabTest lt ON loi.test_id = lt.test_id
+                JOIN LabOrder lo ON loi.order_id = lo.order_id
+                WHERE lo.patient_id = %s
+            """, (pid,))
+
+            # 🔹 Prepare Result Widgets
+            result_widgets = []
+
+            if results:
+                for r in results:
+                    result_widgets.append(
+                        ft.Text(
+                            f"{r['test_name']} | {r['result_value']} {r['unit']} | {r['status']}"
+                        )
+                    )
+            else:
+                result_widgets.append(ft.Text("No results available"))
+
+            # 🔹 Display Results
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Lab Results", size=18, weight="bold"),
+                        *result_widgets
+                    ])
+                )
+            )
+            # 🔹 Dropdowns
+            tests = get_query_data("SELECT test_id, test_name FROM LabTest")
+
+            test_dropdown = ft.Dropdown(
+                label="Select Test",
+                options=[ft.dropdown.Option(key=str(t['test_id']), text=t['test_name']) for t in tests]
+            )
+
+            # 🔥 NEW: Priority Dropdown
+            priority = ft.Dropdown(
+                label="Priority",
+                options=[
+                    ft.dropdown.Option("Routine"),
+                    ft.dropdown.Option("Urgent"),
+                    ft.dropdown.Option("STAT")
+                ],
+                value="Routine"
+            )
+
+            # 🔹 Order Function
+            def order_lab(e):
+
+                conn = get_db_connection()
+                cursor = conn.cursor()
+
+                # Insert order with priority
+                cursor.execute("""
+                    INSERT INTO LabOrder (patient_id, doctor_id, priority)
+                    VALUES (%s, %s, %s)
+                """, (pid, doc_id, priority.value))
+
+                order_id = cursor.lastrowid
+
+                # Insert test
+                cursor.execute("""
+                    INSERT INTO LabOrderItem (order_id, test_id)
+                    VALUES (%s, %s)
+                """, (order_id, test_dropdown.value))
+
+                conn.commit()
+                cursor.close()
+                conn.close()
+
+                show_snack("Lab Ordered", ft.Colors.GREEN)
+                nav_to("doctor_lab")
+
+            # 🔹 UI
+            content_controls.append(
+                ft.Container(
+                    expand=True,
+                    padding=20,
+                    content=ft.Column(
+                        spacing=15,
+                        controls=[
+                            ft.Text("Lab Order Panel", size=20, weight="bold"),
+                            test_dropdown,
+                            priority,   # ✅ added
+                            ft.FilledButton("Order Test", on_click=order_lab)
+                        ]
+                    )
+                )
+            )    
         elif tab == "rec_overview":
             banner = ft.Container(
                 bgcolor=ft.Colors.TEAL_700, 
@@ -1087,8 +1862,20 @@ def main(page: ft.Page):
             fn = ft.TextField(label="First Name", width=250)
             ln = ft.TextField(label="Last Name", width=250)
             dob = ft.TextField(label="Date of Birth (YYYY-MM-DD)", width=250)
-            gen = ft.Dropdown(label="Gender", width=250, options=[ft.dropdown.Option("Male"), ft.dropdown.Option("Female"), ft.dropdown.Option("Other")])
-            bg = ft.Dropdown(label="Blood Group", width=250, options=[ft.dropdown.Option("A+"), ft.dropdown.Option("O+"), ft.dropdown.Option("B+"), ft.dropdown.Option("AB+"), ft.dropdown.Option("O-"), ft.dropdown.Option("A-"), ft.dropdown.Option("B-")])
+            gen = ft.Dropdown(label="Gender", width=250, options=[
+                ft.dropdown.Option("Male"),
+                ft.dropdown.Option("Female"),
+                ft.dropdown.Option("Other")
+            ])
+            bg = ft.Dropdown(label="Blood Group", width=250, options=[
+                ft.dropdown.Option("A+"),
+                ft.dropdown.Option("O+"),
+                ft.dropdown.Option("B+"),
+                ft.dropdown.Option("AB+"),
+                ft.dropdown.Option("O-"),
+                ft.dropdown.Option("A-"),
+                ft.dropdown.Option("B-")
+            ])
             ph = ft.TextField(label="Phone Number", width=250)
             em = ft.TextField(label="Email Address", width=250)
             addr = ft.TextField(label="Residential Address", width=520)
@@ -1103,16 +1890,21 @@ def main(page: ft.Page):
 
             def save_comprehensive_patient(e):
                 conn = get_db_connection()
-                if not conn: return
+                if not conn:
+                    return
+
                 cursor = conn.cursor(dictionary=True)
                 try:
-                    # 1. AUTO-GENERATE AHL-PT-XXXX REGISTRATION NO
+                    rec_id = page.session.store.get("rec_id")
+                    if not rec_id:
+                        show_snack("Receptionist session missing. Please log in again.", ft.Colors.RED)
+                        return
+
                     cursor.execute("SELECT MAX(patient_id) as max_id FROM Patient")
                     res = cursor.fetchone()
                     next_id = (res['max_id'] or 0) + 1 if res else 1
                     auto_reg_no = f"AHL-PT-{next_id:04d}"
 
-                    # 2. Insert Full Schema
                     query = """
                         INSERT INTO Patient (
                             registration_no, first_name, last_name, gender, date_of_birth, blood_group, 
@@ -1122,10 +1914,11 @@ def main(page: ft.Page):
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     params = (
-                        auto_reg_no, fn.value, ln.value, gen.value, dob.value, bg.value, 
-                        ph.value, em.value, addr.value, city.value, st.value, pin.value, 
-                        e_name.value, e_phone.value, e_rel.value, i_prov.value, i_pol.value, uid
+                        auto_reg_no, fn.value, ln.value, gen.value, dob.value, bg.value,
+                        ph.value, em.value, addr.value, city.value, st.value, pin.value,
+                        e_name.value, e_phone.value, e_rel.value, i_prov.value, i_pol.value, rec_id
                     )
+
                     cursor.execute(query, params)
                     conn.commit()
                     show_snack(f"Success! Auto-Generated Patient ID: {auto_reg_no}", ft.Colors.GREEN)
@@ -1138,29 +1931,119 @@ def main(page: ft.Page):
                     conn.close()
 
             content_controls.append(
-                ft.Column(
-                    spacing=15,
-                    controls=[
-                        ft.Text("General Medical Information", weight="bold", color=ft.Colors.TEAL_900),
-                        ft.Text("Note: Registration Number (AHL-PT-XXXX) is generated automatically upon save.", italic=True, color=ft.Colors.GREY),
-                        ft.Row(controls=[fn, ln, dob]), 
-                        ft.Row(controls=[gen, bg, ph, em]),
-                        ft.Divider(), 
-                        ft.Text("Location & Demographics", weight="bold", color=ft.Colors.TEAL_900),
-                        ft.Row(controls=[addr, city, st, pin]),
-                        ft.Divider(), 
-                        ft.Text("Emergency Contacts & Insurance", weight="bold", color=ft.Colors.TEAL_900),
-                        ft.Row(controls=[e_name, e_phone, e_rel]), 
-                        ft.Row(controls=[i_prov, i_pol]),
-                        ft.FilledButton(
-                            "Commit Patient to Database", 
-                            icon=ft.Icons.SAVE, 
-                            style=rec_btn_style, 
-                            on_click=save_comprehensive_patient
-                        )
-                    ]
+                ft.Container(
+                    expand=True,
+                    content=ft.Column(
+                        spacing=15,
+                        scroll=ft.ScrollMode.AUTO,
+                        controls=[
+                            ft.Text("General Medical Information", weight="bold", color=ft.Colors.TEAL_900),
+                            ft.Text(
+                                "Note: Registration Number (AHL-PT-XXXX) is generated automatically upon save.",
+                                italic=True,
+                                color=ft.Colors.GREY
+                            ),
+                            ft.ResponsiveRow(
+                                controls=[
+                                    ft.Container(fn, col=4),
+                                    ft.Container(ln, col=4),
+                                    ft.Container(dob, col=4),
+                                ]
+                            ),
+                            ft.ResponsiveRow(
+                                controls=[
+                                    ft.Container(gen, col=3),
+                                    ft.Container(bg, col=3),
+                                    ft.Container(ph, col=3),
+                                    ft.Container(em, col=3),
+                                ]
+                            ),
+                            ft.Divider(),
+                            ft.Text("Location & Demographics", weight="bold", color=ft.Colors.TEAL_900),
+                            ft.ResponsiveRow(
+                                controls=[
+                                    ft.Container(addr, col=6),
+                                    ft.Container(city, col=2),
+                                    ft.Container(st, col=2),
+                                    ft.Container(pin, col=2),
+                                ]
+                            ),
+                            ft.Divider(),
+                            ft.Text("Emergency Contacts & Insurance", weight="bold", color=ft.Colors.TEAL_900),
+                            ft.ResponsiveRow(
+                                controls=[
+                                    ft.Container(e_name, col=4),
+                                    ft.Container(e_phone, col=4),
+                                    ft.Container(e_rel, col=4),
+                                ]
+                            ),
+                            ft.ResponsiveRow(
+                                controls=[
+                                    ft.Container(i_prov, col=6),
+                                    ft.Container(i_pol, col=6),
+                                ]
+                            ),
+                            ft.FilledButton(
+                                "Commit Patient to Database",
+                                icon=ft.Icons.SAVE,
+                                style=rec_btn_style,
+                                on_click=save_comprehensive_patient
+                            )
+                        ]
+                    )
                 )
             )
+
+    # =====================================================================
+    # 5.7. MODULE: PATIENT SEARCH
+    # =====================================================================
+        elif tab == "search_patient":
+            def search_patient(e):
+                conn = get_db_connection()
+                if not conn:
+                    return
+
+            def save_comprehensive_patient(e):
+                conn = get_db_connection()
+                if not conn:
+                    return
+
+                cursor = conn.cursor(dictionary=True)
+                try:
+                    rec_id = page.session.store.get("rec_id")
+                    if not rec_id:
+                        show_snack("Receptionist session missing. Please log in again.", ft.Colors.RED)
+                        return
+
+                    cursor.execute("SELECT MAX(patient_id) as max_id FROM Patient")
+                    res = cursor.fetchone()
+                    next_id = (res['max_id'] or 0) + 1 if res else 1
+                    auto_reg_no = f"AHL-PT-{next_id:04d}"
+
+                    query = """
+                        INSERT INTO Patient (
+                            registration_no, first_name, last_name, gender, date_of_birth, blood_group, 
+                            phone, email, address, city, state, pincode, 
+                            emergency_contact_name, emergency_contact_phone, emergency_contact_rel, 
+                            insurance_provider, insurance_policy_no, registered_by
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    params = (
+                        auto_reg_no, fn.value, ln.value, gen.value, dob.value, bg.value,
+                        ph.value, em.value, addr.value, city.value, st.value, pin.value,
+                        e_name.value, e_phone.value, e_rel.value, i_prov.value, i_pol.value, rec_id
+                    )
+
+                    cursor.execute(query, params)
+                    conn.commit()
+                    show_snack(f"Success! Auto-Generated Patient ID: {auto_reg_no}", ft.Colors.GREEN)
+                    nav_to("reg_patient")
+                except Exception as ex:
+                    conn.rollback()
+                    show_snack(f"Database Error: {ex}", ft.Colors.RED)
+                finally:
+                    cursor.close()
+                    conn.close()
 
         # =====================================================================
         # 5.7. MODULE: PATIENT MASTER DIRECTORY
@@ -1265,35 +2148,72 @@ def main(page: ft.Page):
             
             appt_date = ft.TextField(label="Date (YYYY-MM-DD)", width=200)
             appt_time = ft.TextField(label="Time (HH:MM)", width=200)
-            appt_type = ft.Dropdown(label="Consultation Type", width=200, options=[ft.dropdown.Option("OPD"), ft.dropdown.Option("Follow-up"), ft.dropdown.Option("Emergency"), ft.dropdown.Option("Online")])
-            
+            appt_type = ft.Dropdown(
+                label="Consultation Type",
+                width=200,
+                options=[
+                    ft.dropdown.Option("OPD"),
+                    ft.dropdown.Option("IPD"),
+                    ft.dropdown.Option("Follow-up"),
+                    ft.dropdown.Option("Emergency"),
+                    ft.dropdown.Option("Online")
+                ]
+            )            
             token_num = ft.TextField(label="Token / Queue Number", width=200)
             visit_reason = ft.TextField(label="Primary Reason for Visit", width=450)
             internal_notes = ft.TextField(label="Internal Desk Notes", width=450)
 
             def execute_booking(e):
                 try:
-                    # Validate Date and extract Day of Week
                     date_obj = datetime.datetime.strptime(appt_date.value, "%Y-%m-%d")
                     day_of_week_str = date_obj.strftime("%a")
-                    
-                    # Logic Check: Doctor Availability Validation
-                    avail_check = get_query_data("SELECT * FROM DoctorAvailability WHERE doctor_id=%s AND day_of_week=%s", (d_dropdown.value, day_of_week_str))
+
+                    token_value = token_num.value.strip()
+                    if not token_value.isdigit():
+                        show_snack("Token Number must be a whole number.", ft.Colors.RED)
+                        return
+                    token_value = int(token_value)
+
+                    avail_check = get_query_data(
+                        "SELECT * FROM DoctorAvailability WHERE doctor_id=%s AND day_of_week=%s",
+                        (d_dropdown.value, day_of_week_str)
+                    )
                     if not avail_check:
                         show_snack(f"Validation Failed: Doctor is NOT scheduled to work on {day_of_week_str}.", ft.Colors.RED)
                         return
 
                     query = """
-                        INSERT INTO Appointment 
-                        (patient_id, doctor_id, receptionist_id, appointment_date, appointment_time, token_number, reason, type, status, notes) 
+                        INSERT INTO Appointment
+                        (patient_id, doctor_id, receptionist_id, appointment_date, appointment_time,
+                        token_number, reason, type, status, notes)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Scheduled', %s)
                     """
-                    params = (p_dropdown.value, d_dropdown.value, rec_id, appt_date.value, appt_time.value, token_num.value, visit_reason.value, appt_type.value, internal_notes.value)
-                    
+                    params = (
+                        int(p_dropdown.value), int(d_dropdown.value), rec_id,
+                        appt_date.value, appt_time.value, token_value,
+                        visit_reason.value, appt_type.value, internal_notes.value
+                    )
+
                     if execute_query(query, params):
-                        show_snack("Appointment Successfully Added to Queue!", ft.Colors.GREEN)
+                        doctor_fee_data = get_query_data(
+                            "SELECT consultation_fee FROM Doctor WHERE doctor_id = %s",
+                            (d_dropdown.value,)
+                        )
+                        consult_fee = float(doctor_fee_data[0]['consultation_fee']) if doctor_fee_data else 0.0
+
+                        create_invoice_and_item(
+                            patient_id=p_dropdown.value,
+                            generated_by=rec_id,
+                            admission_id=None,
+                            item_type="Consultation",
+                            description=f"Appointment consultation charge for Dr. {d_dropdown.value}",
+                            quantity=1,
+                            unit_price=consult_fee
+                        )
+
+                        show_snack("Appointment Successfully Added to Queue and billed.", ft.Colors.GREEN)
                         nav_to("book_appt")
-                    else: 
+                    else:
                         show_snack("Database Transaction Failed. Verify inputs.", ft.Colors.RED)
 
                 except ValueError:
@@ -1401,17 +2321,79 @@ def main(page: ft.Page):
             adm_reason = ft.TextField(label="Medical Reason for Admission", width=550)
 
             def execute_admission(e):
-                query1 = "INSERT INTO Admission (patient_id, doctor_id, bed_id, admission_date, reason, status) VALUES (%s, %s, %s, %s, %s, 'Admitted')"
-                params1 = (p_dropdown.value, d_dropdown.value, b_dropdown.value, adm_date.value, adm_reason.value)
-                
-                query2 = "UPDATE Bed SET status = 'Occupied' WHERE bed_id = %s"
-                params2 = (b_dropdown.value,)
+                conn = get_db_connection()
+                if not conn:
+                    return
+                def execute_admission(e):
+                    conn = get_db_connection()
+                    if not conn:
+                        return
 
-                if execute_transaction([(query1, params1), (query2, params2)]):
-                    show_snack("IPD Admission processed and Bed marked Occupied.", ft.Colors.GREEN)
+                    cursor = conn.cursor()
+
+                    # ✅ FIX: ensure rec_id exists
+                    rec_id = page.session.store.get("rec_id")
+                    if not rec_id:
+                        show_snack("Session expired. Please login again.", ft.Colors.RED)
+                        return
+                cursor = conn.cursor()
+                try:
+                    query1 = """
+                        INSERT INTO Admission
+                        (patient_id, doctor_id, bed_id, admission_date, reason, status)
+                        VALUES (%s, %s, %s, %s, %s, 'Admitted')
+                    """
+                    params1 = (int(p_dropdown.value), int(d_dropdown.value), int(b_dropdown.value), adm_date.value, adm_reason.value)
+
+                    query2 = "UPDATE Bed SET status = 'Occupied' WHERE bed_id = %s"
+                    params2 = (int(b_dropdown.value),)
+
+                    cursor.execute(query1, params1)
+                    admission_id = cursor.lastrowid
+                    cursor.execute(query2, params2)
+
+                    room_data = get_query_data("""
+                        SELECT r.daily_charge
+                        FROM Bed b
+                        JOIN Room r ON b.room_id = r.room_id
+                        WHERE b.bed_id = %s
+                    """, (b_dropdown.value,))
+
+                    room_charge = float(room_data[0]['daily_charge']) if room_data else 0.0
+
+                    invoice_no = f"INV-IPD-{int(datetime.datetime.now().timestamp())}"
+                    cursor.execute("""
+                        INSERT INTO Invoice (
+                            invoice_number, patient_id, admission_id, generated_by,
+                            subtotal, discount, tax, total_amount, paid_amount,
+                            due_amount, payment_status, payment_mode, notes
+                        ) VALUES (%s, %s, %s, %s, %s, 0, 0, %s, 0, %s, 'Unpaid', NULL, %s)
+                    """, (
+                        invoice_no, int(p_dropdown.value), admission_id, rec_id,
+                        room_charge, room_charge, room_charge, "IPD admission charge"
+                    ))
+                    invoice_id = cursor.lastrowid
+
+                    cursor.execute("""
+                        INSERT INTO InvoiceItem
+                        (invoice_id, item_type, description, quantity, unit_price, total_price)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        invoice_id, "Room",
+                        f"Initial room charge for bed {b_dropdown.value}",
+                        1, room_charge, room_charge
+                    ))
+
+                    conn.commit()
+                    show_snack("IPD Admission processed, bed marked occupied, and bill created.", ft.Colors.GREEN)
                     nav_to("admissions")
-                else: 
-                    show_snack("Transaction Failed. Check Data Constraints.", ft.Colors.RED)
+
+                except Exception as e:
+                    conn.rollback()
+                    show_snack(f"Transaction Failed. {e}", ft.Colors.RED)
+                finally:
+                    cursor.close()
+                    conn.close()
 
             adm_data = get_query_data("""
                 SELECT a.admission_id, p.first_name, d.first_name as doc, b.bed_number, w.ward_name, a.admission_date, a.status 
@@ -1478,11 +2460,14 @@ def main(page: ft.Page):
             # Ward Inputs
             w_name = ft.TextField(label="Ward Name", width=200)
             w_type = ft.Dropdown(
-                label="Ward Type", 
-                width=200, 
+                label="Ward Type",
+                width=200,
                 options=[
-                    ft.dropdown.Option("General"), ft.dropdown.Option("ICU"), 
-                    ft.dropdown.Option("NICU"), ft.dropdown.Option("Private"), 
+                    ft.dropdown.Option("General"),
+                    ft.dropdown.Option("ICU"),
+                    ft.dropdown.Option("NICU"),
+                    ft.dropdown.Option("Private"),
+                    ft.dropdown.Option("Semi-Private"),  # ✅ FIX ADDED
                     ft.dropdown.Option("Emergency")
                 ]
             )
@@ -1737,6 +2722,45 @@ def main(page: ft.Page):
                 )
             ]
         )
+    def create_invoice_and_item(patient_id, generated_by, item_type, description, quantity, unit_price, admission_id=None):
+        conn = get_db_connection()
+        if not conn:
+            return None
+
+        cursor = conn.cursor()
+        try:
+            invoice_no = f"INV-{int(datetime.datetime.now().timestamp())}"
+            qty = int(quantity)
+            price = float(unit_price)
+            subtotal = qty * price
+
+            cursor.execute("""
+                INSERT INTO Invoice (
+                    invoice_number, patient_id, admission_id, generated_by,
+                    subtotal, discount, tax, total_amount, paid_amount,
+                    due_amount, payment_status, payment_mode, notes
+                ) VALUES (%s, %s, %s, %s, %s, 0, 0, %s, 0, %s, 'Unpaid', NULL, %s)
+            """, (
+                invoice_no, int(patient_id), admission_id, generated_by,
+                subtotal, subtotal, subtotal, description
+            ))
+            invoice_id = cursor.lastrowid
+
+            cursor.execute("""
+                INSERT INTO InvoiceItem (
+                    invoice_id, item_type, description, quantity, unit_price, total_price
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+            """, (invoice_id, item_type, description, qty, price, subtotal))
+
+            conn.commit()
+            return invoice_id
+        except Exception as e:
+            conn.rollback()
+            print(f"Invoice Error: {e}")
+            return None
+        finally:
+            cursor.close()
+            conn.close()
 
     # =====================================================================
     # 6. STARTUP EXECUTION ENGINE
