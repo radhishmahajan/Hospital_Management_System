@@ -74,6 +74,32 @@ def execute_transaction(queries_with_params):
         cursor.close()
         conn.close()
 
+# =========================
+# LAB HELPERS  ✅ ADD HERE
+# =========================
+def fmt_dt(v):
+    return str(v)[:16] if v else "N/A"
+
+def priority_bg(priority_value):
+    if priority_value == "STAT":
+        return ft.Colors.RED_500
+    if priority_value == "Urgent":
+        return ft.Colors.ORANGE_500
+    return ft.Colors.GREEN_500
+
+def status_bg(status_value):
+    if status_value == "Completed":
+        return ft.Colors.GREEN_700
+    if status_value == "Processing":
+        return ft.Colors.BLUE_700
+    if status_value == "Sample Collected":
+        return ft.Colors.ORANGE_700
+    if status_value == "Cancelled":
+        return ft.Colors.RED_700
+    return ft.Colors.GREY_700
+
+
+
 # =====================================================================
 # 2. MAIN APPLICATION ARCHITECTURE
 # =====================================================================
@@ -125,93 +151,119 @@ def main(page: ft.Page):
     # =====================================================================
     def hire_staff_db(data):
         conn = get_db_connection()
-        if not conn: 
+        if not conn:
             return False
-        
+
         cursor = conn.cursor()
+
+        def safe_date(value):
+            return value if value else None
+
         try:
-            # Step A: Map Role ID securely
+            # 🔹 Role ID
             cursor.execute("SELECT role_id FROM Role WHERE role_name = %s", (data['role'],))
             role_record = cursor.fetchone()
-            if not role_record: 
+            if not role_record:
                 return False
+
             role_id = role_record[0]
 
-            # Step B: Insert into Base Users Table to generate system UID
-            user_query = """
-                INSERT INTO Users (username, u_password, email, role_id, is_active) 
+            # 🔹 Insert into Users
+            cursor.execute("""
+                INSERT INTO Users (username, u_password, email, role_id, is_active)
                 VALUES (%s, %s, %s, %s, TRUE)
-            """
-            cursor.execute(user_query, (data['user'], data['pass'], data['email'], role_id))
+            """, (data['user'], data['pass'], data['email'], role_id))
+
             uid = cursor.lastrowid
-            
-            # Step C: AUTO-GENERATE ENTERPRISE EMPLOYEE ID
+
             emp_id = f"EMP-{data['role'][:3].upper()}-{uid:04d}"
 
-            # Step D: Dynamic Schema Injection based on Role
-            if data['role'] == "Admin":
-                admin_query = """
-                    INSERT INTO Admin (user_id, first_name, last_name, phone, employee_id, access_level) 
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(admin_query, (uid, data['fname'], data['lname'], data['phone'], emp_id, data['access']))
-            
-            elif data['role'] == "Doctor":
-                # Safe type casting for numerics
-                dept = int(data['dept']) if data['dept'].strip().isdigit() else None
-                exp = int(data['exp']) if data['exp'].strip().isdigit() else None
-                fee = float(data['fee']) if data['fee'].strip() else None
-                
-                doc_query = """
+            # 🔹 ROLE BASED INSERT
+            if data['role'] == "Doctor":
+                cursor.execute("""
                     INSERT INTO Doctor (
-                        user_id, first_name, last_name, gender, date_of_birth, phone, email, 
-                        specialization, qualification, license_number, experience_years, 
+                        user_id, first_name, last_name, gender, date_of_birth, phone, email,
+                        specialization, qualification, license_number, experience_years,
                         dept_id, consultation_fee, shift, joining_date, blood_group, address
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(doc_query, (
-                    uid, data['fname'], data['lname'], data['gender'], data['dob'], data['phone'], 
-                    data['email'], data['spec'], data['qual'], data['lic'], exp, dept, fee, 
-                    data['shift'], data['join'], data['bg'], data['addr']
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    uid,
+                    data['fname'], data['lname'],
+                    data['gender'],
+                    safe_date(data['dob']),
+                    data['phone'], data['email'],
+                    data.get('spec'),
+                    data.get('qual'),
+                    data.get('lic'),
+                    int(data['exp']) if data.get('exp') else None,
+                    int(data['dept']) if data.get('dept') else None,
+                    float(data['fee']) if data.get('fee') else None,
+                    data['shift'],
+                    safe_date(data['join']),
+                    data.get('bg'),
+                    data.get('addr')
                 ))
-            
+
+            elif data['role'] == "Admin":
+                cursor.execute("""
+                    INSERT INTO Admin (user_id, first_name, last_name, phone, employee_id, access_level)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (uid, data['fname'], data['lname'], data['phone'], emp_id, data.get('access')))
+
             elif data['role'] == "Receptionist":
-                counter = int(data['counter']) if data['counter'].strip().isdigit() else None
-                rec_query = """
+                cursor.execute("""
                     INSERT INTO Receptionist (
-                        user_id, first_name, last_name, gender, phone, employee_id, 
-                        shift, counter_number, joining_date
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(rec_query, (uid, data['fname'], data['lname'], data['gender'], data['phone'], emp_id, data['shift'], counter, data['join']))
-            
+                        user_id, first_name, last_name, gender, phone,
+                        employee_id, shift, counter_number, joining_date
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    uid,
+                    data['fname'], data['lname'], data['gender'], data['phone'],
+                    emp_id, data['shift'],
+                    int(data.get('counter')) if data.get('counter') else None,
+                    safe_date(data['join'])
+                ))
+
             elif data['role'] == "Lab Technician":
-                lab_query = """
+                cursor.execute("""
                     INSERT INTO LabTechnician (
-                        user_id, first_name, last_name, gender, phone, employee_id, 
-                        qualification, specialization, shift, joining_date
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(lab_query, (uid, data['fname'], data['lname'], data['gender'], data['phone'], emp_id, data['qual'], data['spec'], data['shift'], data['join']))
-            
+                        user_id, first_name, last_name, gender, phone,
+                        employee_id, qualification, specialization, shift, joining_date
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    uid,
+                    data['fname'], data['lname'], data['gender'], data['phone'],
+                    emp_id,
+                    data.get('qual'),
+                    data.get('spec'),
+                    data['shift'],
+                    safe_date(data['join'])
+                ))
+
             elif data['role'] == "Pharmacist":
-                pharm_query = """
+                cursor.execute("""
                     INSERT INTO Pharmacist (
                         user_id, first_name, last_name, license_number, phone, shift
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(
-                    pharm_query,
-                    (uid, data['fname'], data['lname'], data['lic'], data['phone'], data['shift'])
-                )
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    uid,
+                    data['fname'], data['lname'],
+                    data.get('lic'),
+                    data['phone'], data['shift']
+                ))
 
             conn.commit()
             return True
 
         except Exception as e:
-            print(f"Hire Error DB: {e}")
+            print("Hire Error DB:", e)
             conn.rollback()
             return False
+
         finally:
             cursor.close()
             conn.close()
@@ -273,6 +325,13 @@ def main(page: ft.Page):
                     if doc_data:
                         page.session.store.set("doctor_id", doc_data[0]['doctor_id'])
                     page.session.store.set("active_tab", "doctor_dashboard")
+
+                elif user['role_name'] == "Lab Technician":
+                    lab_query = "SELECT lab_tech_id FROM LabTechnician WHERE user_id=%s"
+                    lab_data = get_query_data(lab_query, (user['user_id'],))
+                    if lab_data:
+                        page.session.store.set("lab_tech_id", lab_data[0]['lab_tech_id'])
+                    page.session.store.set("active_tab", "lab_dashboard")    
                 else: 
                     page.session.store.set("active_tab", "unauthorized")
                 
@@ -410,7 +469,13 @@ def main(page: ft.Page):
         user_name = page.session.store.get("username")
         role = page.session.store.get("role")
         tab = page.session.store.get("active_tab")
-
+        def update_order_status(order_id, new_status):
+            execute_query(
+                "UPDATE LabOrder SET status=%s WHERE order_id=%s",
+                (new_status, order_id)
+            )
+            show_snack("Order status updated", ft.Colors.GREEN)
+            nav_to("lab_orders")
         # -------------------------------------------------------------
         # 5.1. DYNAMIC ROLE-BASED SIDEBAR
         # -------------------------------------------------------------
@@ -504,7 +569,52 @@ def main(page: ft.Page):
 
                 ft.Container(expand=True),
                 ft.TextButton("Logout", on_click=logout_action)
-            ]    
+            ]   
+        elif role == "Lab Technician":
+            sidebar_bg = "#004D40"
+            sidebar_controls = [
+                ft.Container(
+                    width=250,
+                    bgcolor="#0F766E",
+                    padding=20,
+                    content=ft.Column(
+                    controls=[
+                        ft.Text("LAB PANEL", size=22, weight="bold", color="white"),
+                        ft.Divider(color="white24"),
+
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.DASHBOARD, color="white"),
+                            title=ft.Text("Lab Dashboard", color="white"),
+                            on_click=lambda _: nav_to("lab_dashboard")
+                        ),
+
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.SCIENCE, color="white"),
+                            title=ft.Text("Test Catalog", color="white"),
+                            on_click=lambda _: nav_to("lab_catalog")
+                        ),
+
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.LIST_ALT, color="white"),
+                            title=ft.Text("Lab Orders", color="white"),
+                            on_click=lambda _: nav_to("lab_orders")
+                        ),
+
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.EDIT, color="white"),
+                            title=ft.Text("Enter Result", color="white"),
+                            on_click=lambda _: nav_to("lab_enter_result")
+                        ),
+
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.HISTORY, color="white"),
+                            title=ft.Text("Result History", color="white"),
+                            on_click=lambda _: nav_to("lab_history")
+                        ),
+                    ]
+                    )
+                    )
+            ]     
         elif role == "Receptionist":
             sidebar_bg = ft.Colors.TEAL_900
             sidebar_controls = [
@@ -577,7 +687,8 @@ def main(page: ft.Page):
             "patients": "Global Patient Directory",
             "meds": "Pharmacy Inventory Control", 
             "rooms": "Wards, Rooms & Bed Configuration", 
-            "billing": "Enterprise Revenue Overview"
+            "billing": "Enterprise Revenue Overview",
+            "lab_dashboard": "Lab Technician Dashboard"
         }
 
         header_banner = ft.Container(
@@ -619,7 +730,8 @@ def main(page: ft.Page):
             ), 
             ft.Divider(height=30)
         ]
-
+        
+        
         # =====================================================================
         # 5.3. MODULE: OVERVIEW DASHBOARDS
         # =====================================================================
@@ -628,7 +740,7 @@ def main(page: ft.Page):
                 bgcolor=ft.Colors.BLUE_900, 
                 padding=40, 
                 border_radius=15, 
-                margin=ft.margin.only(bottom=20),
+                margin=ft.margin.only(),
                 content=ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN, 
                     controls=[
@@ -892,141 +1004,112 @@ def main(page: ft.Page):
                 ])
             ) 
         elif tab == "doctor_patient":
-
             pid = page.session.store.get("selected_patient_id")
 
             if not pid:
                 content_controls.append(ft.Text("No patient selected"))
                 return
 
-            # 🔹 Patient banner
-            p_basic = get_query_data(
-                "SELECT first_name, last_name FROM Patient WHERE patient_id=%s",
-                (pid,)
-            )
-
-            if p_basic:
-                content_controls.append(
-                    ft.Container(
-                        padding=10,
-                        bgcolor=ft.Colors.BLUE_50,
-                        content=ft.Text(f"Current Patient: {p_basic[0]['first_name']} {p_basic[0]['last_name']}")
-                    )
-                )
-
-            # 🔹 Full data
             patient = get_query_data("SELECT * FROM Patient WHERE patient_id=%s", (pid,))
-            vitals = get_query_data("SELECT * FROM VitalSigns WHERE patient_id=%s ORDER BY recorded_at DESC", (pid,))
-            history = get_query_data("SELECT * FROM MedicalHistory WHERE patient_id=%s", (pid,))
-            allergies = get_query_data("SELECT * FROM Allergy WHERE patient_id=%s", (pid,))
-
             if not patient:
                 content_controls.append(ft.Text("Patient not found"))
                 return
 
             p = patient[0]
 
-            # 🔥 IMPORTANT: Create lists separately (fix for Flet crash)
-            vitals_list = [
-                ft.Text(f"{v.get('temperature')} | {v.get('blood_pressure')} | {v.get('heart_rate')}")
-                for v in vitals
-            ]
-
-            history_list = [
-                ft.Text(h.get('condition'))
-                for h in history
-            ]
-
-            allergy_list = [
-                ft.Text(a.get('allergen'))
-                for a in allergies
-            ]
-
-            # 🔹 Tabs (safe structure)
-            # tabs = ft.Tabs(
-            #     tabs=[
-            #         ft.Tab(
-            #             label="Vitals",
-            #             content=ft.Column(vitals_list)
-            #         ),
-            #         ft.Tab(
-            #             label="History",
-            #             content=ft.Column(history_list)
-            #         ),
-            #         ft.Tab(
-            #             label="Allergies",
-            #             content=ft.Column(allergy_list)
-            #         )
-            #     ]
-            # )
-            # 🔹 Vitals Section
-            content_controls.append(
-                ft.Container(
-                    padding=10,
-                    content=ft.Column([
-                        ft.Text("Vitals", size=18, weight="bold"),
-                        *[
-                            ft.Text(f"{v.get('temperature')} | {v.get('blood_pressure')} | {v.get('heart_rate')}")
-                            for v in vitals
-                        ]
-                    ])
+            patient_banner = get_query_data(
+                "SELECT first_name, last_name FROM Patient WHERE patient_id=%s",
+                (pid,)
+            )
+            if patient_banner:
+                content_controls.append(
+                    ft.Container(
+                        padding=10,
+                        bgcolor=ft.Colors.BLUE_50,
+                        content=ft.Text(f"Current Patient: {patient_banner[0]['first_name']} {patient_banner[0]['last_name']}")
+                    )
                 )
-            )
 
-            # 🔹 History Section
-            # content_controls.append(
-            #     ft.Container(
-            #         padding=10,
-            #         content=ft.Column([
-            #             ft.Text("Medical History", size=18, weight="bold"),
-            #             *[
-            #                 ft.Text(h.get('condition'))
-            #                 for h in history
-            #             ]
-            #         ])
-            #     )
-            # )
+            vitals = get_query_data("""
+                SELECT
+                    temperature, blood_pressure, pulse_rate, respiratory_rate,
+                    oxygen_saturation, weight, height, blood_sugar, notes, recorded_at
+                FROM VitalSigns
+                WHERE patient_id=%s
+                ORDER BY recorded_at DESC
+            """, (pid,))
 
-            # 🔹 Allergy Section
-            content_controls.append(
-                ft.Container(
-                    padding=10,
-                    content=ft.Column([
-                        ft.Text("Allergies", size=18, weight="bold"),
-                        *[
-                            ft.Text(a.get('allergen'))
-                            for a in allergies
-                        ]
-                    ])
-                )
-            )
-            # 🔹 Main UI
-            content_controls.append(
-                ft.Column([
-                    ft.Text(f"{p['first_name']} {p['last_name']}", size=24, weight="bold"),
-                    ft.Text(f"Blood Group: {p['blood_group']} | Phone: {p['phone']}"),
-                    
-                    ft.Text(f"Address: {p['address']}")
+            history = get_query_data("""
+                SELECT condition_name, diagnosed_date, status, notes
+                FROM MedicalHistory
+                WHERE patient_id=%s
+                ORDER BY diagnosed_date DESC
+            """, (pid,))
 
-                ])
-            )
+            allergies = get_query_data("SELECT allergen FROM Allergy WHERE patient_id=%s", (pid,))
 
-            # 🔹 Add vitals form
-            
-            # 🔹 Prepare history widgets
+            vitals_widgets = []
+            if vitals:
+                for v in vitals:
+                    vitals_widgets.append(
+                        ft.Container(
+                            padding=10,
+                            border_radius=8,
+                            bgcolor=ft.Colors.GREY_100,
+                            content=ft.Column([
+                                ft.Text(f"Temp: {v.get('temperature')} | BP: {v.get('blood_pressure')} | Pulse: {v.get('pulse_rate')}"),
+                                ft.Text(f"Resp: {v.get('respiratory_rate')} | SpO2: {v.get('oxygen_saturation')} | Weight: {v.get('weight')} | Height: {v.get('height')}"),
+                                ft.Text(f"Blood Sugar: {v.get('blood_sugar')} | {v.get('recorded_at')}"),
+                                ft.Text(f"Notes: {v.get('notes') or 'N/A'}")
+                            ])
+                        )
+                    )
+            else:
+                vitals_widgets.append(ft.Text("No vitals recorded"))
+
             history_widgets = []
-
             if history:
                 for h in history:
                     history_widgets.append(
-                        ft.Text(
-                            f"{h['condition_name']} | {h['status']} | {h['diagnosed_date']}\n{h['notes']}"
+                        ft.Container(
+                            padding=10,
+                            border_radius=8,
+                            bgcolor=ft.Colors.GREY_100,
+                            content=ft.Column([
+                                ft.Text(f"{h.get('condition_name')} | {h.get('status')}"),
+                                ft.Text(f"Diagnosed: {h.get('diagnosed_date')}"),
+                                ft.Text(f"Notes: {h.get('notes') or 'N/A'}")
+                            ])
                         )
                     )
             else:
                 history_widgets.append(ft.Text("No medical history available"))
 
-            # 🔹 Display
+            allergy_widgets = []
+            if allergies:
+                for a in allergies:
+                    allergy_widgets.append(ft.Text(a.get('allergen')))
+            else:
+                allergy_widgets.append(ft.Text("No allergies recorded"))
+
+            content_controls.append(
+                ft.Column([
+                    ft.Text(f"{p['first_name']} {p['last_name']}", size=24, weight="bold"),
+                    ft.Text(f"Blood Group: {p['blood_group']} | Phone: {p['phone']}"),
+                    ft.Text(f"Address: {p['address']}"),
+                ])
+            )
+
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Vitals", size=18, weight="bold"),
+                        *vitals_widgets
+                    ])
+                )
+            )
+
             content_controls.append(
                 ft.Container(
                     padding=10,
@@ -1036,10 +1119,20 @@ def main(page: ft.Page):
                     ])
                 )
             )
-            # 🔹 Add Medical History Form
+
+            content_controls.append(
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Allergies", size=18, weight="bold"),
+                        *allergy_widgets
+                    ])
+                )
+            )
+
             condition_name = ft.TextField(label="Condition Name")
             diagnosed_date = ft.TextField(label="Diagnosed Date (YYYY-MM-DD)")
-            status = ft.Dropdown(
+            hist_status = ft.Dropdown(
                 label="Status",
                 options=[
                     ft.dropdown.Option("Active"),
@@ -1047,44 +1140,42 @@ def main(page: ft.Page):
                     ft.dropdown.Option("Chronic")
                 ]
             )
-            notes = ft.TextField(label="Notes")
+            hist_notes = ft.TextField(label="Notes")
 
             def save_history(e):
-                pid = page.session.store.get("selected_patient_id")
-
-                if not pid:
+                if not page.session.store.get("selected_patient_id"):
                     show_snack("Select patient first", ft.Colors.RED)
                     return
 
                 execute_query("""
-                    INSERT INTO MedicalHistory 
+                    INSERT INTO MedicalHistory
                     (patient_id, condition_name, diagnosed_date, status, notes)
                     VALUES (%s, %s, %s, %s, %s)
                 """, (
-                    pid,
+                    page.session.store.get("selected_patient_id"),
                     condition_name.value,
                     diagnosed_date.value,
-                    status.value,
-                    notes.value
+                    hist_status.value,
+                    hist_notes.value
                 ))
 
                 show_snack("Medical History Added", ft.Colors.GREEN)
                 nav_to("doctor_patient")
-                
-                
-                content_controls.append(
+
+            content_controls.append(
                 ft.Container(
                     padding=10,
                     content=ft.Column([
                         ft.Text("Add Medical History", weight="bold"),
                         condition_name,
                         diagnosed_date,
-                        status,
-                        notes,
+                        hist_status,
+                        hist_notes,
                         ft.FilledButton("Save", on_click=save_history)
                     ])
                 )
-            )  # refresh
+            )
+
             temp = ft.TextField(label="Temperature")
             bp = ft.TextField(label="Blood Pressure")
             pulse = ft.TextField(label="Pulse Rate")
@@ -1093,48 +1184,46 @@ def main(page: ft.Page):
             weight = ft.TextField(label="Weight")
             height = ft.TextField(label="Height")
             sugar = ft.TextField(label="Blood Sugar")
-            notes = ft.TextField(label="Notes")
-            
+            vitals_notes = ft.TextField(label="Notes")
 
             def save_vitals(e):
-                pid = page.session.store.get("selected_patient_id")
+                pid_local = page.session.store.get("selected_patient_id")
                 doc_id = page.session.store.get("doctor_id")
 
                 execute_query("""
-                    INSERT INTO VitalSigns 
+                    INSERT INTO VitalSigns
                     (patient_id, recorded_by, temperature, blood_pressure, pulse_rate,
                     respiratory_rate, oxygen_saturation, weight, height, blood_sugar, notes)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    pid, doc_id,
+                    pid_local, doc_id,
                     temp.value, bp.value, pulse.value,
                     resp.value, spo2.value,
                     weight.value, height.value,
-                    sugar.value, notes.value
+                    sugar.value, vitals_notes.value
                 ))
 
                 show_snack("Vitals Saved", ft.Colors.GREEN)
                 nav_to("doctor_patient")
+
             content_controls.append(
-            ft.Container(
-                padding=10,
-                content=ft.Column([
-                    ft.Text("Add Vitals", size=18, weight="bold"),
-
-                    temp,
-                    bp,
-                    pulse,     # ✅ fixed
-                    resp,
-                    spo2,
-                    weight,
-                    height,
-                    sugar,
-                    notes,
-
-                    ft.FilledButton("Save Vitals", on_click=save_vitals)
-                ])
+                ft.Container(
+                    padding=10,
+                    content=ft.Column([
+                        ft.Text("Add Vitals", size=18, weight="bold"),
+                        temp,
+                        bp,
+                        pulse,
+                        resp,
+                        spo2,
+                        weight,
+                        height,
+                        sugar,
+                        vitals_notes,
+                        ft.FilledButton("Save Vitals", on_click=save_vitals)
+                    ])
+                )
             )
-        )
             
         elif tab == "doctor_prescription":
             pid = page.session.store.get("selected_patient_id")
@@ -1275,160 +1364,499 @@ def main(page: ft.Page):
                 )
             )
                    
-        elif tab == "doctor_lab":
+        
+        # =========================
+        # LAB HELPERS
+        # =========================
+        # def fmt_dt(v):
+        #     return str(v)[:16] if v else "N/A"
 
-            pid = page.session.store.get("selected_patient_id")
-            doc_id = page.session.store.get("doctor_id")
+        # def priority_bg(priority_value):
+        #     if priority_value == "STAT":
+        #         return ft.Colors.RED_500
+        #     if priority_value == "Urgent":
+        #         return ft.Colors.ORANGE_500
+        #     return ft.Colors.GREEN_500
 
-            if not pid:
-                content_controls.append(ft.Text("Select patient first"))
+        # def status_bg(status_value):
+        #     if status_value == "Completed":
+        #         return ft.Colors.GREEN_700
+        #     if status_value == "Processing":
+        #         return ft.Colors.BLUE_700
+        #     if status_value == "Sample Collected":
+        #         return ft.Colors.ORANGE_700
+        #     if status_value == "Cancelled":
+        #         return ft.Colors.RED_700
+        #     return ft.Colors.GREY_700
+
+        # def update_order_status(order_id, new_status):
+        #     execute_query(
+        #         "UPDATE LabOrder SET status=%s WHERE order_id=%s",
+        #         (new_status, order_id)
+        #     )
+        #     show_snack("Order status updated", ft.Colors.GREEN)
+        #     nav_to("lab_orders")
+
+        elif tab == "lab_dashboard":
+            lab_tech_id = page.session.store.get("lab_tech_id")
+
+            if not lab_tech_id:
+                content_controls.append(ft.Text("Lab technician session missing. Please log in again."))
                 return
 
-            # 🔹 Patient Banner
-            # 🔹 Patient Banner
-            patient_data = get_query_data(
-                "SELECT first_name, last_name FROM Patient WHERE patient_id=%s",
-                (pid,)
+            tests_count = get_query_data("SELECT COUNT(*) AS c FROM LabTest")
+            orders_count = get_query_data("SELECT COUNT(*) AS c FROM LabOrder")
+            pending_count = get_query_data("SELECT COUNT(*) AS c FROM LabOrder WHERE status != 'Completed'")
+            results_count = get_query_data("SELECT COUNT(*) AS c FROM LabResult")
+
+            total_tests = tests_count[0]["c"] if tests_count else 0
+            total_orders = orders_count[0]["c"] if orders_count else 0
+            pending_orders = pending_count[0]["c"] if pending_count else 0
+            total_results = results_count[0]["c"] if results_count else 0
+
+            content_controls.append(
+                ft.Container(
+                    margin=ft.Margin.only(bottom=12),
+                    padding=16,
+                    border_radius=12,
+                    bgcolor=ft.Colors.BLUE_50,
+                    content=ft.Column([
+                        ft.Text("Lab Technician Dashboard", size=24, weight="bold"),
+                        ft.Text("Tests, orders, results, and history in one workspace."),
+                        ft.Row(
+                            controls=[
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Tests", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_tests), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Orders", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_orders), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Pending", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(pending_orders), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Results", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_results), size=22, weight="bold")
+                                    ])
+                                ),
+                            ],
+                            spacing=12,
+                        )
+                    ])
+                )
             )
 
-            if patient_data:
-                content_controls.append(
-                    ft.Container(
-                        padding=10,
-                        bgcolor=ft.Colors.BLUE_50,
-                        content=ft.Text(
-                            f"Current Patient: {patient_data[0]['first_name']} {patient_data[0]['last_name']}"
+            content_controls.append(
+                ft.Row(
+                    controls=[
+                        ft.FilledButton("Test Catalog", on_click=lambda e: nav_to("lab_catalog")),
+                        ft.FilledButton("Lab Orders", on_click=lambda e: nav_to("lab_orders")),
+                        ft.FilledButton("Enter Result", on_click=lambda e: nav_to("lab_enter_result")),
+                        ft.FilledButton("Result History", on_click=lambda e: nav_to("lab_history")),
+                    ],
+                    spacing=12
+                )
+            )  
+
+        elif tab == "lab_catalog":
+            tests_catalog = get_query_data("""
+                SELECT
+                    t.test_id,
+                    t.test_name,
+                    t.test_code,
+                    COALESCE(c.category_name, 'Uncategorized') AS category_name,
+                    t.description,
+                    t.sample_type,
+                    t.sample_volume,
+                    t.normal_range,
+                    t.unit,
+                    t.turnaround_hours,
+                    t.price,
+                    t.equipment_required
+                FROM LabTest t
+                LEFT JOIN LabTestCategory c ON t.test_cat_id = c.test_cat_id
+                ORDER BY category_name, t.test_name
+            """)
+
+            test_groups = {}
+            for t in tests_catalog or []:
+                cat = t.get("category_name") or "Uncategorized"
+                test_groups.setdefault(cat, []).append(t)
+
+            content_controls.append(ft.Text("Test Categories & Catalog", size=20, weight="bold"))
+
+            if test_groups:
+                for cat_name, items in test_groups.items():
+                    item_cards = []
+                    for t in items:
+                        item_cards.append(
+                            ft.Container(
+                                margin=ft.Margin.only(bottom=8),
+                                padding=12,
+                                border_radius=10,
+                                bgcolor=ft.Colors.GREY_100,
+                                content=ft.Column([
+                                    ft.Text(f"{t['test_name']} ({t.get('test_code') or 'No code'})", weight="bold"),
+                                    ft.Text(f"Sample: {t.get('sample_type') or 'N/A'} | Volume: {t.get('sample_volume') or 'N/A'}"),
+                                    ft.Text(f"Range: {t.get('normal_range') or 'N/A'} | Unit: {t.get('unit') or 'N/A'}"),
+                                    ft.Text(f"Turnaround: {t.get('turnaround_hours') or 'N/A'} hrs | Price: {t.get('price') or 'N/A'}"),
+                                    ft.Text(f"Equipment: {t.get('equipment_required') or 'N/A'}"),
+                                    ft.Text(f"Description: {t.get('description') or 'N/A'}"),
+                                ])
+                            )
+                        )
+
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(cat_name, size=16, weight="bold"),
+                                *item_cards
+                            ])
                         )
                     )
-                )
+            else:
+                content_controls.append(ft.Text("No lab tests found"))  
 
-            # 🔹 Fetch Lab Records
-            lab_records = get_query_data("""
-                SELECT l.test_name, lo.ordered_at
+        elif tab == "lab_orders":
+            lab_orders = get_query_data("""
+                SELECT
+                    lo.order_id,
+                    loi.order_item_id,
+                    p.first_name AS patient_first,
+                    p.last_name AS patient_last,
+                    d.first_name AS doctor_first,
+                    d.last_name AS doctor_last,
+                    t.test_name,
+                    t.test_code,
+                    COALESCE(c.category_name, 'Uncategorized') AS category_name,
+                    t.sample_type,
+                    t.sample_volume,
+                    t.normal_range,
+                    t.unit,
+                    t.turnaround_hours,
+                    t.price,
+                    t.equipment_required,
+                    lo.priority,
+                    lo.status,
+                    lo.ordered_at,
+                    lo.notes
                 FROM LabOrder lo
-                JOIN LabOrderItem li ON lo.order_id = li.order_id
-                JOIN LabTest l ON li.test_id = l.test_id
-                WHERE lo.patient_id = %s
-                ORDER BY lo.ordered_at DESC                         
-            """, (pid,))
+                JOIN LabOrderItem loi ON lo.order_id = loi.order_id
+                JOIN LabTest t ON loi.test_id = t.test_id
+                LEFT JOIN LabTestCategory c ON t.test_cat_id = c.test_cat_id
+                JOIN Patient p ON lo.patient_id = p.patient_id
+                JOIN Doctor d ON lo.doctor_id = d.doctor_id
+                ORDER BY lo.ordered_at DESC
+            """)
 
-            # 🔹 Prepare Lab Record Widgets
-            lab_widgets = []
+            content_controls.append(ft.Text("Active Lab Orders", size=20, weight="bold"))
 
-            if lab_records:
-                for r in lab_records:
-                    lab_widgets.append(
-                        ft.Text(f"{r['test_name']} | 📅 Ordered on {r['ordered_at']}")
-                    )
-            else:
-                lab_widgets.append(ft.Text("No lab records found"))
-
-            # 🔹 Display Lab Records
-            content_controls.append(
-                ft.Container(
-                    padding=10,
-                    content=ft.Column([
-                        ft.Text("Lab Records", size=18, weight="bold"),
-                        *lab_widgets
-                    ])
-                )
-            )
-
-            # 🔹 Fetch Lab Results
-            results = get_query_data("""
-                SELECT lr.result_value, lr.unit, lr.status, lt.test_name
-                FROM LabResult lr
-                JOIN LabOrderItem loi ON lr.order_item_id = loi.order_item_id
-                JOIN LabTest lt ON loi.test_id = lt.test_id
-                JOIN LabOrder lo ON loi.order_id = lo.order_id
-                WHERE lo.patient_id = %s
-            """, (pid,))
-
-            # 🔹 Prepare Result Widgets
-            result_widgets = []
-
-            if results:
-                for r in results:
-                    result_widgets.append(
-                        ft.Text(
-                            f"{r['test_name']} | {r['result_value']} {r['unit']} | {r['status']}"
-                        )
-                    )
-            else:
-                result_widgets.append(ft.Text("No results available"))
-
-            # 🔹 Display Results
-            content_controls.append(
-                ft.Container(
-                    padding=10,
-                    content=ft.Column([
-                        ft.Text("Lab Results", size=18, weight="bold"),
-                        *result_widgets
-                    ])
-                )
-            )
-            # 🔹 Dropdowns
-            tests = get_query_data("SELECT test_id, test_name FROM LabTest")
-
-            test_dropdown = ft.Dropdown(
-                label="Select Test",
-                options=[ft.dropdown.Option(key=str(t['test_id']), text=t['test_name']) for t in tests]
-            )
-
-            # 🔥 NEW: Priority Dropdown
-            priority = ft.Dropdown(
-                label="Priority",
-                options=[
-                    ft.dropdown.Option("Routine"),
-                    ft.dropdown.Option("Urgent"),
-                    ft.dropdown.Option("STAT")
-                ],
-                value="Routine"
-            )
-
-            # 🔹 Order Function
-            def order_lab(e):
-
-                conn = get_db_connection()
-                cursor = conn.cursor()
-
-                # Insert order with priority
-                cursor.execute("""
-                    INSERT INTO LabOrder (patient_id, doctor_id, priority)
-                    VALUES (%s, %s, %s)
-                """, (pid, doc_id, priority.value))
-
-                order_id = cursor.lastrowid
-
-                # Insert test
-                cursor.execute("""
-                    INSERT INTO LabOrderItem (order_id, test_id)
-                    VALUES (%s, %s)
-                """, (order_id, test_dropdown.value))
-
-                conn.commit()
-                cursor.close()
-                conn.close()
-
-                show_snack("Lab Ordered", ft.Colors.GREEN)
-                nav_to("doctor_lab")
-
-            # 🔹 UI
-            content_controls.append(
-                ft.Container(
-                    expand=True,
-                    padding=20,
-                    content=ft.Column(
-                        spacing=15,
-                        controls=[
-                            ft.Text("Lab Order Panel", size=20, weight="bold"),
-                            test_dropdown,
-                            priority,   # ✅ added
-                            ft.FilledButton("Order Test", on_click=order_lab)
+            if lab_orders:
+                for o in lab_orders:
+                    status_dd = ft.Dropdown(
+                        width=220,
+                        label="Update Status",
+                        value=o["status"],
+                        options=[
+                            ft.dropdown.Option("Ordered"),
+                            ft.dropdown.Option("Sample Collected"),
+                            ft.dropdown.Option("Processing"),
+                            ft.dropdown.Option("Completed"),
+                            ft.dropdown.Option("Cancelled"),
                         ]
                     )
+
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Row(
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    controls=[
+                                        ft.Text(f"{o['patient_first']} {o['patient_last']}", size=16, weight="bold"),
+                                        ft.Container(
+                                            padding=6,
+                                            border_radius=8,
+                                            bgcolor=priority_bg(o["priority"]),
+                                            content=ft.Text(o["priority"], color=ft.Colors.WHITE, weight="bold")
+                                        )
+                                    ]
+                                ),
+                                ft.Text(f"Order ID: {o['order_id']} | Item ID: {o['order_item_id']}"),
+                                ft.Text(f"Doctor: Dr. {o['doctor_first']} {o['doctor_last']}"),
+                                ft.Text(f"Test: {o['test_name']} ({o.get('test_code') or 'No code'})"),
+                                ft.Text(f"Category: {o.get('category_name') or 'Uncategorized'}"),
+                                ft.Text(f"Sample: {o.get('sample_type') or 'N/A'} | Volume: {o.get('sample_volume') or 'N/A'}"),
+                                ft.Text(f"Normal Range: {o.get('normal_range') or 'N/A'} | Unit: {o.get('unit') or 'N/A'}"),
+                                ft.Text(f"Turnaround: {o.get('turnaround_hours') or 'N/A'} hrs | Price: {o.get('price') or 'N/A'}"),
+                                ft.Text(f"Ordered At: {fmt_dt(o.get('ordered_at'))}"),
+                                ft.Text(f"Notes: {o.get('notes') or 'N/A'}"),
+                                ft.Row(
+                                    controls=[
+                                        ft.Container(
+                                            padding=6,
+                                            border_radius=8,
+                                            bgcolor=status_bg(o["status"]),
+                                            content=ft.Text(o["status"], color=ft.Colors.WHITE, weight="bold")
+                                        ),
+                                        status_dd,
+                                        ft.FilledButton(
+                                            "Save Status",
+                                            on_click=lambda e, oid=o["order_id"], dd=status_dd: update_order_status(oid, dd.value)
+                                        )
+                                    ],
+                                    spacing=12
+                                )
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No lab orders found"))   
+
+        elif tab == "lab_enter_result":
+            pending_items = get_query_data("""
+                SELECT
+                    loi.order_item_id,
+                    lo.order_id,
+                    p.first_name,
+                    p.last_name,
+                    t.test_name,
+                    lo.ordered_at
+                FROM LabOrderItem loi
+                JOIN LabOrder lo ON loi.order_id = lo.order_id
+                JOIN Patient p ON lo.patient_id = p.patient_id
+                JOIN LabTest t ON loi.test_id = t.test_id
+                WHERE lo.status IN ('Ordered', 'Sample Collected', 'Processing')
+                ORDER BY lo.ordered_at DESC
+            """)
+
+            doctors = get_query_data("""
+                SELECT doctor_id, first_name, last_name
+                FROM Doctor
+                ORDER BY first_name, last_name
+            """)
+
+            item_dropdown = ft.Dropdown(
+                label="Select Order Item",
+                width=420,
+                options=[
+                    ft.dropdown.Option(
+                        key=str(i["order_item_id"]),
+                        text=f"#{i['order_item_id']} | {i['first_name']} {i['last_name']} | {i['test_name']} | {fmt_dt(i.get('ordered_at'))}"
+                    )
+                    for i in (pending_items or [])
+                ]
+            )
+
+            result_value = ft.TextField(label="Result Value", width=300)
+            result_unit = ft.TextField(label="Unit", width=180)
+            result_normal_range = ft.TextField(label="Normal Range", width=240)
+            result_status = ft.Dropdown(
+                label="Result Status",
+                width=220,
+                options=[
+                    ft.dropdown.Option("Normal"),
+                    ft.dropdown.Option("Abnormal"),
+                    ft.dropdown.Option("Critical"),
+                ],
+                value="Normal"
+            )
+            result_remarks = ft.TextField(label="Remarks", multiline=True, min_lines=2, max_lines=4, width=520)
+
+            verified_by = ft.Dropdown(
+                label="Verified By Doctor (optional)",
+                width=320,
+                options=[ft.dropdown.Option("None")] + [
+                    ft.dropdown.Option(
+                        key=str(d["doctor_id"]),
+                        text=f"Dr. {d['first_name']} {d['last_name']}"
+                    )
+                    for d in (doctors or [])
+                ],
+                value="None"
+            )
+
+            def submit_result(e):
+                if not item_dropdown.value:
+                    show_snack("Select an order item first.", ft.Colors.RED)
+                    return
+
+                conn = get_db_connection()
+                if not conn:
+                    return
+
+                cursor = conn.cursor()
+                try:
+                    verified_value = None
+                    if verified_by.value and verified_by.value != "None":
+                        verified_value = int(verified_by.value)
+
+                    cursor.execute("""
+                        INSERT INTO LabResult (
+                            order_item_id,
+                            lab_tech_id,
+                            sample_collected_at,
+                            result_value,
+                            unit,
+                            normal_range,
+                            status,
+                            remarks,
+                            verified_by
+                        )
+                        VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, %s)
+                    """, (
+                        int(item_dropdown.value),
+                        int(lab_tech_id),
+                        result_value.value,
+                        result_unit.value,
+                        result_normal_range.value,
+                        result_status.value,
+                        result_remarks.value,
+                        verified_value
+                    ))
+
+                    cursor.execute("""
+                        SELECT order_id
+                        FROM LabOrderItem
+                        WHERE order_item_id = %s
+                    """, (int(item_dropdown.value),))
+                    row = cursor.fetchone()
+                    if row:
+                        cursor.execute("""
+                            UPDATE LabOrder
+                            SET status='Completed'
+                            WHERE order_id=%s
+                        """, (row[0],))
+
+                    conn.commit()
+                    show_snack("Lab result submitted.", ft.Colors.GREEN)
+                    nav_to("lab_history")
+                except Exception as ex:
+                    conn.rollback()
+                    show_snack(f"Lab result error: {ex}", ft.Colors.RED)
+                finally:
+                    cursor.close()
+                    conn.close()
+
+            content_controls.append(ft.Text("Enter Lab Result", size=20, weight="bold"))
+            content_controls.append(
+                ft.Container(
+                    padding=14,
+                    border_radius=12,
+                    bgcolor=ft.Colors.WHITE,
+                    content=ft.Column([
+                        item_dropdown,
+                        ft.Row([result_value, result_unit, result_normal_range], spacing=12),
+                        ft.Row([result_status, verified_by], spacing=12),
+                        result_remarks,
+                        ft.FilledButton("Submit Lab Result", on_click=submit_result)
+                    ], spacing=12)
                 )
-            )    
+            ) 
+
+        elif tab == "lab_history":
+            results = get_query_data("""
+                SELECT
+                    lr.result_id,
+                    p.first_name AS patient_first,
+                    p.last_name AS patient_last,
+                    t.test_name,
+                    lr.result_value,
+                    lr.unit,
+                    lr.normal_range,
+                    lr.status,
+                    lr.remarks,
+                    lr.sample_collected_at,
+                    lr.reported_at,
+                    d1.first_name AS verifier_first,
+                    d1.last_name AS verifier_last
+                FROM LabResult lr
+                JOIN LabOrderItem loi ON lr.order_item_id = loi.order_item_id
+                JOIN LabOrder lo ON loi.order_id = lo.order_id
+                JOIN Patient p ON lo.patient_id = p.patient_id
+                JOIN LabTest t ON loi.test_id = t.test_id
+                LEFT JOIN Doctor d1 ON lr.verified_by = d1.doctor_id
+                ORDER BY lr.reported_at DESC
+            """)
+
+            content_controls.append(ft.Text("Results History", size=20, weight="bold"))
+
+            result_cards = []
+            if results:
+                for r in results:
+                    verifier_name = "N/A"
+                    if r.get("verifier_first"):
+                        verifier_name = f"Dr. {r['verifier_first']} {r['verifier_last']}"
+
+                    result_cards.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.GREY_100,
+                            content=ft.Column([
+                                ft.Row(
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    controls=[
+                                        ft.Text(f"{r['patient_first']} {r['patient_last']}", weight="bold"),
+                                        ft.Container(
+                                            padding=6,
+                                            border_radius=8,
+                                            bgcolor=status_bg(r["status"]),
+                                            content=ft.Text(r["status"], color=ft.Colors.WHITE, weight="bold")
+                                        )
+                                    ]
+                                ),
+                                ft.Text(f"Test: {r['test_name']}"),
+                                ft.Text(f"Result: {r['result_value']} {r.get('unit') or ''}"),
+                                ft.Text(f"Normal Range: {r.get('normal_range') or 'N/A'}"),
+                                ft.Text(f"Sample Collected: {fmt_dt(r.get('sample_collected_at'))}"),
+                                ft.Text(f"Reported: {fmt_dt(r.get('reported_at'))}"),
+                                ft.Text(f"Verified By: {verifier_name}"),
+                                ft.Text(f"Remarks: {r.get('remarks') or 'N/A'}"),
+                            ])
+                        )
+                    )
+            else:
+                result_cards.append(ft.Text("No results available"))
+
+            content_controls.append(
+                ft.Column(result_cards, spacing=0)
+            )               
+
         elif tab == "rec_overview":
             banner = ft.Container(
                 bgcolor=ft.Colors.TEAL_700, 
@@ -1501,29 +1929,41 @@ def main(page: ft.Page):
             level_data = get_query_data("SELECT access_level FROM Admin WHERE user_id = %s", (uid,))
             level = level_data[0]['access_level'] if level_data else "standard"
 
-            # Shared Form Inputs
+            # Common inputs
             us_in = ft.TextField(label="System Username", width=250)
             pa_in = ft.TextField(label="System Password", password=True, width=250)
             em_in = ft.TextField(label="System Email Address", width=250)
             fn_in = ft.TextField(label="First Name", width=250)
             ln_in = ft.TextField(label="Last Name", width=250)
             ph_in = ft.TextField(label="Phone Number", width=250)
-            
+
             ro_drop = ft.Dropdown(
-                label="Assign Role", 
-                width=250, 
+                label="Assign Role",
+                width=250,
                 options=[
-                    ft.dropdown.Option("Doctor"), 
-                    ft.dropdown.Option("Receptionist"), 
-                    ft.dropdown.Option("Admin"), 
-                    ft.dropdown.Option("Lab Technician"), 
+                    ft.dropdown.Option("Doctor"),
+                    ft.dropdown.Option("Receptionist"),
+                    ft.dropdown.Option("Admin"),
+                    ft.dropdown.Option("Lab Technician"),
                     ft.dropdown.Option("Pharmacist")
                 ]
             )
-            
-            # --- DYNAMIC FIELD DEFINITIONS ---
-            acc_drop = ft.Dropdown(label="Admin Access Level", width=250, options=[ft.dropdown.Option("super"), ft.dropdown.Option("standard")])
-            gen_drop = ft.Dropdown(label="Gender", width=250, options=[ft.dropdown.Option("Male"), ft.dropdown.Option("Female"), ft.dropdown.Option("Other")])
+
+            # Role-specific inputs
+            acc_drop = ft.Dropdown(
+                label="Admin Access Level",
+                width=250,
+                options=[ft.dropdown.Option("super"), ft.dropdown.Option("standard")]
+            )
+            gen_drop = ft.Dropdown(
+                label="Gender",
+                width=250,
+                options=[
+                    ft.dropdown.Option("Male"),
+                    ft.dropdown.Option("Female"),
+                    ft.dropdown.Option("Other")
+                ]
+            )
             dob_in = ft.TextField(label="DOB (YYYY-MM-DD)", width=250)
             spec_in = ft.TextField(label="Specialization", width=250)
             qual_in = ft.TextField(label="Qualifications", width=250)
@@ -1531,39 +1971,38 @@ def main(page: ft.Page):
             exp_in = ft.TextField(label="Years of Experience", width=250)
             dept_in = ft.TextField(label="Department ID", width=250)
             fee_in = ft.TextField(label="Consultation Fee (₹)", width=250)
-            shift_drop = ft.Dropdown(label="Assigned Shift", width=250, options=[ft.dropdown.Option("Morning"), ft.dropdown.Option("Evening"), ft.dropdown.Option("Night"), ft.dropdown.Option("Rotating")])
+            shift_drop = ft.Dropdown(
+                label="Assigned Shift",
+                width=250,
+                options=[
+                    ft.dropdown.Option("Morning"),
+                    ft.dropdown.Option("Evening"),
+                    ft.dropdown.Option("Night"),
+                    ft.dropdown.Option("Rotating")
+                ]
+            )
             join_in = ft.TextField(label="Joining Date (YYYY-MM-DD)", width=250)
-            bg_drop = ft.Dropdown(label="Blood Group", width=250, options=[ft.dropdown.Option("A+"), ft.dropdown.Option("O+"), ft.dropdown.Option("B+"), ft.dropdown.Option("AB+"), ft.dropdown.Option("O-")])
+            bg_drop = ft.Dropdown(
+                label="Blood Group",
+                width=250,
+                options=[
+                    ft.dropdown.Option("A+"),
+                    ft.dropdown.Option("O+"),
+                    ft.dropdown.Option("B+"),
+                    ft.dropdown.Option("AB+"),
+                    ft.dropdown.Option("O-")
+                ]
+            )
             addr_in = ft.TextField(label="Full Residential Address", width=520)
             counter_in = ft.TextField(label="Desk/Counter Number", width=250)
 
-            # This is the crucial container. We call .update() on THIS container.
             dynamic_fields = ft.Column(controls=[])
 
-            def build_dynamic_form(e):
-                # 1. Clear existing controls
+            def update_fields(e):
+                role_value = ro_drop.value
                 dynamic_fields.controls.clear()
-                
-                # 2. Check if a role is actually selected
-                if not ro_drop.value:
-                    dynamic_fields.update()
-                    return
 
-                # 3. Add Header and Note
-                dynamic_fields.controls.append(
-                    ft.Text(f"Required Schema Attributes for {ro_drop.value}", weight="bold", color=ft.Colors.BLUE_900)
-                )
-                dynamic_fields.controls.append(
-                    ft.Text("Note: Employee ID will be auto-generated upon save.", italic=True, color=ft.Colors.GREY)
-                )
-                
-                # 4. Inject specific rows based on exact schema
-                if ro_drop.value == "Admin":
-                    dynamic_fields.controls.append(
-                        ft.Row(controls=[acc_drop])
-                    )
-                
-                elif ro_drop.value == "Doctor":
+                if role_value == "Doctor":
                     dynamic_fields.controls.extend([
                         ft.Row(controls=[gen_drop, dob_in]),
                         ft.Row(controls=[spec_in, qual_in]),
@@ -1573,56 +2012,58 @@ def main(page: ft.Page):
                         ft.Row(controls=[bg_drop]),
                         addr_in
                     ])
-                
-                elif ro_drop.value == "Receptionist":
+
+                elif role_value == "Receptionist":
                     dynamic_fields.controls.extend([
                         ft.Row(controls=[gen_drop, shift_drop]),
                         ft.Row(controls=[counter_in, join_in])
                     ])
-                
-                elif ro_drop.value == "Lab Technician":
+
+                elif role_value == "Lab Technician":
                     dynamic_fields.controls.extend([
                         ft.Row(controls=[gen_drop, shift_drop]),
                         ft.Row(controls=[spec_in, qual_in]),
                         ft.Row(controls=[join_in])
                     ])
-                
-                elif ro_drop.value == "Pharmacist":
+
+                elif role_value == "Pharmacist":
                     dynamic_fields.controls.extend([
                         ft.Row(controls=[lic_in, shift_drop])
                     ])
-                
-                # 5. THE FIX: Force the specific container to redraw itself instantly
-                dynamic_fields.update()
 
-            # Attach event listener to dropdown
-            ro_drop.on_change = build_dynamic_form
+                elif role_value == "Admin":
+                    dynamic_fields.controls.append(ft.Row(controls=[acc_drop]))
+
+                page.update()
+
+            ro_drop.on_change = update_fields
+            
 
             def execute_hire(e):
                 data_dict = {
-                    "role": ro_drop.value, 
-                    "user": us_in.value, 
-                    "pass": pa_in.value, 
+                    "role": ro_drop.value,
+                    "user": us_in.value,
+                    "pass": pa_in.value,
                     "email": em_in.value,
-                    "fname": fn_in.value, 
-                    "lname": ln_in.value, 
+                    "fname": fn_in.value,
+                    "lname": ln_in.value,
                     "phone": ph_in.value,
-                    "access": acc_drop.value, 
-                    "gender": gen_drop.value, 
+                    "access": acc_drop.value,
+                    "gender": gen_drop.value,
                     "dob": dob_in.value,
-                    "spec": spec_in.value, 
-                    "qual": qual_in.value, 
+                    "spec": spec_in.value,
+                    "qual": qual_in.value,
                     "lic": lic_in.value,
-                    "exp": exp_in.value, 
-                    "dept": dept_in.value, 
+                    "exp": exp_in.value,
+                    "dept": dept_in.value,
                     "fee": fee_in.value,
-                    "shift": shift_drop.value, 
-                    "join": join_in.value, 
+                    "shift": shift_drop.value,
+                    "join": join_in.value,
                     "bg": bg_drop.value,
-                    "addr": addr_in.value, 
+                    "addr": addr_in.value,
                     "counter": counter_in.value
                 }
-                
+
                 if hire_staff_db(data_dict):
                     hire_dlg.open = False
                     page.update()
@@ -1634,88 +2075,81 @@ def main(page: ft.Page):
             hire_dlg = ft.AlertDialog(
                 title=ft.Text("Register New Personnel", weight="bold"),
                 content=ft.Container(
-                    width=570, 
+                    width=570,
                     content=ft.Column(
                         controls=[
                             ft.Text("System Access Credentials", weight="bold", color=ft.Colors.BLUE_900),
-                            ft.Row(
-                                controls=[us_in, pa_in]
-                            ), 
-                            ft.Row(
-                                controls=[em_in, ro_drop]
-                            ),
+                            ft.Row(controls=[us_in, pa_in]),
+                            ft.Row(controls=[em_in, ro_drop]),
                             ft.Divider(),
                             ft.Text("Basic Identity", weight="bold", color=ft.Colors.BLUE_900),
-                            ft.Row(
-                                controls=[fn_in, ln_in]
-                            ), 
-                            ft.Row(
-                                controls=[ph_in]
-                            ),
+                            ft.Row(controls=[fn_in, ln_in]),
+                            ft.Row(controls=[ph_in]),
                             ft.Divider(),
                             dynamic_fields
-                        ], 
-                        tight=True, 
+                        ],
+                        tight=True,
                         scroll=ft.ScrollMode.AUTO
                     )
                 ),
                 actions=[
                     ft.FilledButton(
-                        "Save Complete Profile to Database", 
-                        on_click=execute_hire, 
+                        "Save Complete Profile to Database",
+                        on_click=execute_hire,
                         style=admin_btn_style
                     )
                 ]
             )
 
-            # Eye Icon Logic to View Staff Database Profile
             def open_staff_profile(staff_member):
                 table_map = {
-                    "Admin": "Admin", 
-                    "Doctor": "Doctor", 
-                    "Receptionist": "Receptionist", 
-                    "Lab Technician": "LabTechnician", 
+                    "Admin": "Admin",
+                    "Doctor": "Doctor",
+                    "Receptionist": "Receptionist",
+                    "Lab Technician": "LabTechnician",
                     "Pharmacist": "Pharmacist"
                 }
                 table_name = table_map.get(staff_member['role_name'], staff_member['role_name'].replace(" ", ""))
-                
+
                 profile_query = f"SELECT * FROM {table_name} WHERE user_id = %s"
                 profile_data = get_query_data(profile_query, (staff_member['user_id'],))
                 p = profile_data[0] if profile_data else {}
 
                 extra_controls = []
                 if staff_member['role_name'] == "Doctor":
-                    extra_controls.append(ft.Text(f"Specialization: {p.get('specialization')} | Qualification: {p.get('qualification')}"))
-                    extra_controls.append(ft.Text(f"Medical License: {p.get('license_number')} | Experience: {p.get('experience_years')} yrs"))
-                    extra_controls.append(ft.Text(f"Consultation Fee: ₹{p.get('consultation_fee')} | Active Shift: {p.get('shift')}"))
-                    extra_controls.append(ft.Text(f"Joining Date: {p.get('joining_date')} | Dept ID: {p.get('dept_id')}"))
-                
+                    extra_controls.extend([
+                        ft.Text(f"Specialization: {p.get('specialization')} | Qualification: {p.get('qualification')}"),
+                        ft.Text(f"Medical License: {p.get('license_number')} | Experience: {p.get('experience_years')} yrs"),
+                        ft.Text(f"Consultation Fee: ₹{p.get('consultation_fee')} | Active Shift: {p.get('shift')}"),
+                        ft.Text(f"Joining Date: {p.get('joining_date')} | Dept ID: {p.get('dept_id')}")
+                    ])
                 elif staff_member['role_name'] == "Admin":
                     extra_controls.append(ft.Text(f"Employee ID: {p.get('employee_id')} | Access Rights: {str(p.get('access_level')).upper()}"))
-                
                 elif staff_member['role_name'] == "Receptionist":
-                    extra_controls.append(ft.Text(f"Employee ID: {p.get('employee_id')} | Active Shift: {p.get('shift')}"))
-                    extra_controls.append(ft.Text(f"Counter Number: {p.get('counter_number')} | Joining Date: {p.get('joining_date')}"))
-                
+                    extra_controls.extend([
+                        ft.Text(f"Employee ID: {p.get('employee_id')} | Active Shift: {p.get('shift')}"),
+                        ft.Text(f"Counter Number: {p.get('counter_number')} | Joining Date: {p.get('joining_date')}")
+                    ])
                 elif staff_member['role_name'] == "Lab Technician":
-                    extra_controls.append(ft.Text(f"Employee ID: {p.get('employee_id')} | Active Shift: {p.get('shift')}"))
-                    extra_controls.append(ft.Text(f"Specialization: {p.get('specialization')} | Qualification: {p.get('qualification')}"))
-                    extra_controls.append(ft.Text(f"Joining Date: {p.get('joining_date')}"))
-                
+                    extra_controls.extend([
+                        ft.Text(f"Employee ID: {p.get('employee_id')} | Active Shift: {p.get('shift')}"),
+                        ft.Text(f"Specialization: {p.get('specialization')} | Qualification: {p.get('qualification')}"),
+                        ft.Text(f"Joining Date: {p.get('joining_date')}")
+                    ])
                 elif staff_member['role_name'] == "Pharmacist":
                     extra_controls.append(ft.Text(f"Pharmacy License: {p.get('license_number')} | Active Shift: {p.get('shift')}"))
 
                 staff_dlg = ft.AlertDialog(
                     title=ft.Text(f"Personnel Profile: {staff_member['username']}", weight="bold", color=ft.Colors.BLUE_900),
                     content=ft.Container(
-                        width=500, 
+                        width=500,
                         content=ft.Column(
                             controls=[
                                 ft.Row(
                                     controls=[
-                                        ft.Text(f"System ID: {staff_member['user_id']}", weight="bold"), 
+                                        ft.Text(f"System ID: {staff_member['user_id']}", weight="bold"),
                                         ft.Text(f"Role: {staff_member['role_name']}", weight="bold", color=ft.Colors.GREY_600)
-                                    ], 
+                                    ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                                 ),
                                 ft.Divider(),
@@ -1723,21 +2157,21 @@ def main(page: ft.Page):
                                 ft.Text(f"Name: {p.get('first_name', 'Data Missing')} {p.get('last_name', '')}"),
                                 ft.Text(f"Email: {staff_member['email']} | Phone: {p.get('phone', 'N/A')}"),
                                 ft.Text(
-                                    f"System Access: {'GRANTED' if staff_member['is_active'] else 'REVOKED'}", 
-                                    color=ft.Colors.GREEN if staff_member['is_active'] else ft.Colors.RED, 
+                                    f"System Access: {'GRANTED' if staff_member['is_active'] else 'REVOKED'}",
+                                    color=ft.Colors.GREEN if staff_member['is_active'] else ft.Colors.RED,
                                     weight="bold"
                                 ),
                                 ft.Divider(),
                                 ft.Text("Schema & Operational Attributes", weight="bold", color=ft.Colors.GREY_600),
                                 *extra_controls
-                            ], 
-                            tight=True, 
+                            ],
+                            tight=True,
                             scroll=ft.ScrollMode.AUTO
                         )
                     ),
                     actions=[
                         ft.TextButton(
-                            "Close Profile", 
+                            "Close Profile",
                             on_click=lambda e: setattr(staff_dlg, 'open', False) or page.update()
                         )
                     ]
@@ -1746,49 +2180,51 @@ def main(page: ft.Page):
                 staff_dlg.open = True
                 page.update()
 
-            staff_data = get_query_data("SELECT u.user_id, u.username, r.role_name, u.email, u.is_active FROM Users u JOIN Role r ON u.role_id = r.role_id")
-            
-            if not staff_data: 
+            staff_data = get_query_data(
+                "SELECT u.user_id, u.username, r.role_name, u.email, u.is_active FROM Users u JOIN Role r ON u.role_id = r.role_id"
+            )
+
+            if not staff_data:
                 content_controls.append(ft.Text("No personnel data found in system.", color=ft.Colors.GREY))
             else:
                 table_rows = []
                 for s in staff_data:
                     view_btn = ft.IconButton(
-                        icon=ft.Icons.VISIBILITY, 
-                        icon_color=ft.Colors.BLUE_900, 
+                        icon=ft.Icons.VISIBILITY,
+                        icon_color=ft.Colors.BLUE_900,
                         on_click=lambda e, data=s: open_staff_profile(data)
                     )
                     table_rows.append(
                         ft.DataRow(
                             cells=[
-                                ft.DataCell(ft.Text(s['username'])), 
-                                ft.DataCell(ft.Text(s['role_name'])), 
-                                ft.DataCell(ft.Text(s['email'])), 
+                                ft.DataCell(ft.Text(s['username'])),
+                                ft.DataCell(ft.Text(s['role_name'])),
+                                ft.DataCell(ft.Text(s['email'])),
                                 ft.DataCell(view_btn)
                             ]
                         )
                     )
-                
-                if level == "super": 
+
+                if level == "super":
                     content_controls.append(
                         ft.FilledButton(
-                            "Register New Staff Member", 
-                            icon=ft.Icons.PERSON_ADD, 
-                            style=admin_btn_style, 
+                            "Register New Staff Member",
+                            icon=ft.Icons.PERSON_ADD,
+                            style=admin_btn_style,
                             on_click=lambda e: page.overlay.append(hire_dlg) or setattr(hire_dlg, 'open', True) or page.update()
                         )
                     )
-                
+
                 content_controls.extend([
                     ft.Divider(),
-                    ft.Text("Click the eye icon to view comprehensive schema attributes for any staff member.", color=ft.Colors.GREY), 
+                    ft.Text("Click the eye icon to view comprehensive schema attributes for any staff member.", color=ft.Colors.GREY),
                     ft.DataTable(
                         columns=[
-                            ft.DataColumn(ft.Text("Username")), 
-                            ft.DataColumn(ft.Text("Role")), 
-                            ft.DataColumn(ft.Text("Email Address")), 
+                            ft.DataColumn(ft.Text("Username")),
+                            ft.DataColumn(ft.Text("Role")),
+                            ft.DataColumn(ft.Text("Email Address")),
                             ft.DataColumn(ft.Text("Action"))
-                        ], 
+                        ],
                         rows=table_rows
                     )
                 ])

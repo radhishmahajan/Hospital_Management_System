@@ -403,7 +403,7 @@ INSERT INTO Prescription (prescription_id, consultation_id, patient_id, doctor_i
 (6, 7, 2,  2, '2024-04-05 10:30:00', '2024-07-05', 'Verapamil to be taken at night. Avoid alcohol.'),
 (7, 8, 1,  1, '2024-04-11 09:35:00', '2024-07-11', 'HbA1c and Lipid profile after 3 months. Continue current medications.');
 
-INSERT INTO PrescriptionItem (item_id, prescription_id, medicine_id, dosage, frequency, duration_days, route, instructions) VALUES
+INSERT INTO  ionItem (item_id, prescription_id, medicine_id, dosage, frequency, duration_days, route, instructions) VALUES
 -- Prescription 1: Patient 1, Hypertension + DM
 (1,  1, 7,  '1 tablet',   'Once daily (OD)',      30,  'Oral', 'Morning, before breakfast'),
 (2,  1, 8,  '1 tablet',   'Once daily (OD)',      30,  'Oral', 'Morning, with food'),
