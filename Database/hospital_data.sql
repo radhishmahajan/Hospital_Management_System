@@ -1,7 +1,7 @@
 
 -- HOSPITAL DATABASE 
 
-USE hospital_database;
+USE hospital;
 
 
 SET FOREIGN_KEY_CHECKS = 0;
@@ -720,7 +720,73 @@ INSERT INTO AuditLog (log_id, user_id, action, table_name, record_id, old_values
 (14, 2,  'UPDATE', 'Patient',     5,    '{"status":"Active"}',                       '{"status":"Admitted"}',                                  '192.168.1.10', '2024-04-03 14:35:00'),
 (15, 1,  'DELETE', 'StaffSchedule',4,   '{"user_id":9,"date":"2024-04-10","status":"Scheduled"}', NULL,                                        '192.168.1.10', '2024-04-10 18:00:00');
 
+
+-- OPD invoices
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 1,
+    dispense_id = 1
+WHERE invoice_id = 1;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 2,
+    dispense_id = 2
+WHERE invoice_id = 2;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 3,
+    dispense_id = 3
+WHERE invoice_id = 3;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Partially Paid',
+    consultation_id = 4,
+    dispense_id = 4
+WHERE invoice_id = 4;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 5,
+    dispense_id = 5
+WHERE invoice_id = 7;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Issued',
+    consultation_id = 8,
+    dispense_id = NULL
+WHERE invoice_id = 9;
+
+-- IPD invoices
+UPDATE Invoice
+SET bill_type = 'IPD',
+    status = 'Partially Paid',
+    consultation_id = 6,
+    dispense_id = NULL
+WHERE invoice_id = 5;
+
+UPDATE Invoice
+SET bill_type = 'IPD',
+    status = 'Paid',
+    consultation_id = NULL,
+    dispense_id = NULL
+WHERE invoice_id = 6;
+
+UPDATE Invoice
+SET bill_type = 'IPD',
+    status = 'Paid',
+    consultation_id = NULL,
+    dispense_id = NULL
+WHERE invoice_id = 8;
 -- ─────────────────────────────────────────────
 -- RE-ENABLE FK CHECKS
 -- ─────────────────────────────────────────────
+;     -- Aspirin
 SET FOREIGN_KEY_CHECKS = 1;

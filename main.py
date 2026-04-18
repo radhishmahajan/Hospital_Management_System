@@ -3,6 +3,33 @@ import mysql.connector
 from mysql.connector import Error
 import datetime
 
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+
+def generate_invoice_pdf(invoice_id, items, total):
+    file_path = f"invoice_{invoice_id}.pdf"
+
+    doc = SimpleDocTemplate(file_path)
+    styles = getSampleStyleSheet()
+
+    elements = []
+    elements.append(Paragraph(f"Invoice #{invoice_id}", styles["Title"]))
+    elements.append(Spacer(1, 10))
+
+    for item in items:
+        elements.append(
+            Paragraph(
+                f"{item['description']} | Qty {item['quantity']} | ₹{item['unit_price']}",
+                styles["Normal"]
+            )
+        )
+
+    elements.append(Spacer(1, 10))
+    elements.append(Paragraph(f"Total: ₹{total}", styles["Heading2"]))
+
+    doc.build(elements)
+
+    return file_path
 # =====================================================================
 # 1. DATABASE CONNECTION & CORE UTILITIES
 # =====================================================================
@@ -98,6 +125,36 @@ def status_bg(status_value):
         return ft.Colors.RED_700
     return ft.Colors.GREY_700
 
+def make_invoice_number():
+    return f"PH-INV-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+def get_medicine_category_groups():
+    meds = get_query_data("""
+        SELECT
+            m.medicine_id,
+            m.medicine_name,
+            m.generic_name,
+            m.brand_name,
+            COALESCE(c.category_name, 'Uncategorized') AS category_name,
+            m.dosage_form,
+            m.strength,
+            m.unit_price,
+            m.stock_quantity,
+            m.reorder_level,
+            m.expiry_date,
+            m.storage_condition,
+            m.prescription_required
+        FROM Medicine m
+        LEFT JOIN MedicineCategory c ON m.category_id = c.category_id
+        ORDER BY category_name, m.medicine_name
+    """)
+    groups = {}
+    for m in meds or []:
+        cat = m.get("category_name") or "Uncategorized"
+        groups.setdefault(cat, []).append(m)
+    return meds or [], groups
+
+
 
 
 # =====================================================================
@@ -149,16 +206,80 @@ def main(page: ft.Page):
     # =====================================================================
     # 3. DYNAMIC STAFF HIRING LOGIC (WITH AUTO EMP-ID)
     # =====================================================================
+    def register_patient_db(data):
+            conn = get_db_connection()
+            if not conn:
+                return False
+
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT role_id FROM Role WHERE role_name=%s", ("Patient",))
+                role_record = cursor.fetchone()
+                if not role_record:
+                    return False
+
+                role_id = role_record[0]
+
+                cursor.execute("""
+                    INSERT INTO Users (username, u_password, email, role_id, is_active)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                """, (data["user"], data["pass"], data["email"], role_id))
+
+                uid = cursor.lastrowid
+                reg_no = f"APL-PT-{uid:04d}"
+
+                cursor.execute("""
+                    INSERT INTO Patient (
+                        user_id, registration_no, first_name, last_name, gender,
+                        date_of_birth, blood_group, phone, email, address,
+                        city, state, pincode,
+                        emergency_contact_name, emergency_contact_phone, emergency_contact_rel,
+                        insurance_provider, insurance_policy_no, registered_by
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    uid,
+                    reg_no,
+                    data["fname"],
+                    data["lname"],
+                    data["gender"],
+                    data["dob"] or None,
+                    data["bg"],
+                    data["phone"],
+                    data["email"],
+                    data["addr"],
+                    data["city"],
+                    data["state"],
+                    data["pincode"],
+                    data["emg_name"],
+                    data["emg_phone"],
+                    data["emg_rel"],
+                    data["ins_provider"],
+                    data["ins_policy"],
+                    data.get("registered_by")
+                ))
+
+                conn.commit()
+                return True
+
+            except Exception as e:
+                print("Patient Register Error:", e)
+                conn.rollback()
+                return False
+            finally:
+                cursor.close()
+                conn.close()
     def hire_staff_db(data):
+
         conn = get_db_connection()
         if not conn:
             return False
 
         cursor = conn.cursor()
-
+        
         def safe_date(value):
             return value if value else None
-
+   
         try:
             # 🔹 Role ID
             cursor.execute("SELECT role_id FROM Role WHERE role_name = %s", (data['role'],))
@@ -332,6 +453,22 @@ def main(page: ft.Page):
                     if lab_data:
                         page.session.store.set("lab_tech_id", lab_data[0]['lab_tech_id'])
                     page.session.store.set("active_tab", "lab_dashboard")    
+
+                # in login_view handle_login
+                elif user['role_name'] == "Pharmacist":
+                    pharm_query = "SELECT pharmacist_id FROM Pharmacist WHERE user_id=%s"
+                    pharm_data = get_query_data(pharm_query, (user['user_id'],))
+                    if pharm_data:
+                        page.session.store.set("pharmacist_id", pharm_data[0]['pharmacist_id'])
+                    page.session.store.set("active_tab", "pharma_dashboard")  
+
+                elif user['role_name'] == "Patient":
+                    pat_query = "SELECT patient_id FROM Patient WHERE user_id=%s"
+                    pat_data = get_query_data(pat_query, (user['user_id'],))
+                    if pat_data:
+                        page.session.store.set("patient_id", pat_data[0]['patient_id'])
+                    page.session.store.set("active_tab", "patient_dashboard")
+
                 else: 
                     page.session.store.set("active_tab", "unauthorized")
                 
@@ -469,6 +606,18 @@ def main(page: ft.Page):
         user_name = page.session.store.get("username")
         role = page.session.store.get("role")
         tab = page.session.store.get("active_tab")
+        def handle_discharge(e):
+            if not source_dd.value:
+                show_snack("Select IPD admission first", ft.Colors.RED)
+                return
+
+            try:
+                aid = int(source_dd.value)
+            except:
+                show_snack("Invalid admission selected", ft.Colors.RED)
+                return
+
+            generate_discharge_bill(aid)
         def update_order_status(order_id, new_status):
             execute_query(
                 "UPDATE LabOrder SET status=%s WHERE order_id=%s",
@@ -476,219 +625,517 @@ def main(page: ft.Page):
             )
             show_snack("Order status updated", ft.Colors.GREEN)
             nav_to("lab_orders")
-        # -------------------------------------------------------------
+
+        def make_invoice_number(prefix="APL"):
+            return f"{prefix}-INV-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        def safe_float(v, default=0.0):
+            try:
+                return float(v)
+            except:
+                return default
+
+        def save_invoice_record(
+            patient_id,
+            bill_type,
+            items,
+            collect_now=False,
+            payment_mode=None,
+            notes="",
+            consultation_id=None,
+            lab_order_id=None,
+            dispense_id=None,
+            admission_id=None,
+        ):
+            if not items:
+                raise Exception("No bill items found")
+
+            conn = get_db_connection()
+            if not conn:
+                return None
+
+            cursor = conn.cursor()
+            try:
+                subtotal = round(sum(safe_float(i["quantity"]) * safe_float(i["unit_price"]) for i in items), 2)
+                discount = 0.0
+                tax = 0.0
+                total = round(subtotal - discount + tax, 2)
+
+                paid_amount = total if collect_now else 0.0
+                due_amount = round(total - paid_amount, 2)
+                payment_status = "Paid" if collect_now else "Unpaid"
+                print("DEBUG VALUES:")
+                print(patient_id, admission_id, dispense_id)
+                print("ITEMS:", items)
+
+                cursor.execute("""
+                    INSERT INTO Invoice (
+                        invoice_number, patient_id, admission_id, generated_by,
+                        invoice_date, subtotal, discount, tax, total_amount,
+                        paid_amount, due_amount, payment_status, payment_mode, notes,
+                        bill_type, consultation_id, lab_order_id, dispense_id
+                    )
+                    VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    make_invoice_number(),
+                    patient_id,
+                    admission_id,
+                    1,   # ✅ FIXED (NO uid ERROR)
+                    subtotal,
+                    discount,
+                    tax,
+                    total,
+                    paid_amount,
+                    due_amount,
+                    payment_status,
+                    payment_mode if collect_now else None,
+                    notes,
+                    "PHARMACY",   # ✅ FORCE VALUE
+                    consultation_id,
+                    lab_order_id,
+                    dispense_id
+                ))
+
+                invoice_id = cursor.lastrowid
+
+                for item in items:
+                    cursor.execute("""
+                        INSERT INTO InvoiceItem (
+                            invoice_id, item_type, description, quantity, unit_price, total_price
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        invoice_id,
+                        item["item_type"],
+                        item["description"],
+                        item["quantity"],
+                        item["unit_price"],
+                        round(safe_float(item["quantity"]) * safe_float(item["unit_price"]), 2)
+                    ))
+
+                conn.commit()
+                return invoice_id
+            except Exception as e:
+                conn.rollback()
+                print("INVOICE ERROR:", e)   # 🔥 ADD THIS
+                show_snack(f"Invoice Error: {e}", ft.Colors.RED)
+                return None
+            finally:
+                cursor.close()
+                conn.close()
+
+        def generate_discharge_bill(admission_id):
+
+            # =========================
+            # 1. GET PATIENT
+            # =========================
+            adm = get_query_data("""
+                SELECT patient_id, admission_date, discharge_date
+                FROM Admission
+                WHERE admission_id = %s
+            """, (admission_id,))
+
+            if not adm:
+                show_snack("Admission not found", ft.Colors.RED)
+                return
+
+            patient_id = adm[0]["patient_id"]
+
+            items = []
+
+            # =========================
+            # 2. ROOM CHARGES
+            # =========================
+            room = get_query_data("""
+                SELECT r.room_number, r.daily_charge,
+                    a.admission_date, a.discharge_date
+                FROM Admission a
+                JOIN Bed b ON a.bed_id = b.bed_id
+                JOIN Room r ON b.room_id = r.room_id
+                WHERE a.admission_id = %s
+            """, (admission_id,))
+
+            if room:
+                r = room[0]
+
+                days = 1
+                if r["discharge_date"]:
+                    days = (r["discharge_date"].date() - r["admission_date"].date()).days or 1
+
+                items.append({
+                    "item_type": "Room",
+                    "description": f"Room {r['room_number']} ({days} days)",
+                    "quantity": days,
+                    "unit_price": float(r["daily_charge"])
+                })
+
+            # =========================
+            # 3. LAB CHARGES
+            # =========================
+            labs = get_query_data("""
+                SELECT t.test_name, t.price
+                FROM LabOrder lo
+                JOIN LabOrderItem li ON lo.order_id = li.order_id
+                JOIN LabTest t ON li.test_id = t.test_id
+                WHERE lo.patient_id = %s
+                AND lo.consultation_id IS NOT NULL
+            """, (patient_id,))
+
+            for l in (labs or []):
+                items.append({
+                    "item_type": "Lab",
+                    "description": l["test_name"],
+                    "quantity": 1,
+                    "unit_price": float(l["price"])
+                })
+
+            # =========================
+            # 4. PHARMACY CHARGES
+            # =========================
+            meds = get_query_data("""
+                SELECT m.medicine_name, di.quantity, di.unit_price
+                FROM PharmacyDispense pd
+                JOIN DispenseItem di ON pd.dispense_id = di.dispense_id
+                JOIN Medicine m ON di.medicine_id = m.medicine_id
+                WHERE pd.patient_id = %s
+            """, (patient_id,))
+
+            for m in (meds or []):
+                items.append({
+                    "item_type": "Medicine",
+                    "description": m["medicine_name"],
+                    "quantity": int(m["quantity"]),
+                    "unit_price": float(m["unit_price"])
+                })
+
+            # =========================
+            # 5. CONSULTATION
+            # =========================
+            consult = get_query_data("""
+                SELECT d.first_name, d.last_name, d.consultation_fee
+                FROM Consultation c
+                JOIN Doctor d ON c.doctor_id = d.doctor_id
+                WHERE c.patient_id = %s
+            """, (patient_id,))
+
+            for c in (consult or []):
+                items.append({
+                    "item_type": "Consultation",
+                    "description": f"Dr. {c['first_name']} {c['last_name']}",
+                    "quantity": 1,
+                    "unit_price": float(c["consultation_fee"])
+                })
+
+            # =========================
+            # 6. CHECK EMPTY
+            # =========================
+            if not items:
+                show_snack("No billable items found", ft.Colors.RED)
+                return
+
+            # =========================
+            # 7. SAVE FINAL INVOICE
+            # =========================
+            invoice_id = save_invoice_record(
+                patient_id=patient_id,
+                bill_type="IPD",
+                items=items,
+                collect_now=False,
+                payment_mode=None,
+                notes=f"Final Discharge Bill (Admission {admission_id})",
+                admission_id=admission_id
+            )
+
+            if invoice_id:
+                show_snack("Discharge bill generated", ft.Colors.GREEN)
+            else:
+                show_snack("Failed to generate bill", ft.Colors.RED)        
+
+        def mark_invoice_paid(invoice_id, mode):
+            conn = get_db_connection()
+            if not conn:
+                return
+
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    UPDATE Invoice
+                    SET paid_amount = total_amount,
+                        due_amount = 0,
+                        payment_status = 'Paid',
+                        status = 'Paid',
+                        payment_mode = %s
+                    WHERE invoice_id = %s
+                """, (mode, invoice_id))
+                conn.commit()
+                show_snack("Invoice marked as paid", ft.Colors.GREEN)
+                nav_to("billing")
+            except Exception as e:
+                conn.rollback()
+                show_snack(f"Payment error: {e}", ft.Colors.RED)
+            finally:
+                cursor.close()
+                conn.close()
+            
+        # ----------------------
+        # ---------------------------------------
         # 5.1. DYNAMIC ROLE-BASED SIDEBAR
         # -------------------------------------------------------------
+        # -----------------------------
+
         sidebar_controls = []
         sidebar_bg = "#004D40"
 
         if role == "Admin":
             level_data = get_query_data("SELECT access_level FROM Admin WHERE user_id = %s", (uid,))
             level = level_data[0]['access_level'] if level_data else "standard"
-            
+
             sidebar_controls = [
-                ft.Text("COMMAND CENTER", color="white", weight="bold", size=20), 
+                ft.Text("COMMAND CENTER", color="white", weight="bold", size=20),
                 ft.Divider(color="white24"),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.ANALYTICS, color="white"), 
-                    title=ft.Text("Overview", color="white"), 
+                    leading=ft.Icon(ft.Icons.ANALYTICS, color="white"),
+                    title=ft.Text("Overview", color="white"),
                     on_click=lambda _: nav_to("admin_overview")
                 ),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.PEOPLE_ALT, color="white"), 
-                    title=ft.Text("Manage Staff", color="white"), 
+                    leading=ft.Icon(ft.Icons.PEOPLE_ALT, color="white"),
+                    title=ft.Text("Manage Staff", color="white"),
                     on_click=lambda _: nav_to("staff")
                 ),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.SCHEDULE, color="white"), 
-                    title=ft.Text("Staff Schedules", color="white"), 
+                    leading=ft.Icon(ft.Icons.SCHEDULE, color="white"),
+                    title=ft.Text("Staff Schedules", color="white"),
                     on_click=lambda _: nav_to("schedules")
                 ),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.PERSON_SEARCH, color="white"), 
-                    title=ft.Text("Patients Directory", color="white"), 
+                    leading=ft.Icon(ft.Icons.PERSON_SEARCH, color="white"),
+                    title=ft.Text("Patients Directory", color="white"),
                     on_click=lambda _: nav_to("patients")
                 ),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.MEDICATION, color="white"), 
-                    title=ft.Text("Pharmacy Inventory", color="white"), 
+                    leading=ft.Icon(ft.Icons.MEDICATION, color="white"),
+                    title=ft.Text("Pharmacy Inventory", color="white"),
                     on_click=lambda _: nav_to("meds")
                 ),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.DOMAIN, color="white"), 
-                    title=ft.Text("Facility Management", color="white"), 
+                    leading=ft.Icon(ft.Icons.DOMAIN, color="white"),
+                    title=ft.Text("Facility Management", color="white"),
                     on_click=lambda _: nav_to("rooms")
                 ),
                 ft.ListTile(
-                    leading=ft.Icon(ft.Icons.ATTACH_MONEY, color="white"), 
-                    title=ft.Text("Revenue Overview", color="white"), 
+                    leading=ft.Icon(ft.Icons.PAYMENTS, color="white"),
+                    title=ft.Text("Billing Overview", color="white"),
                     on_click=lambda _: nav_to("billing")
                 ),
                 ft.Container(expand=True),
                 ft.Container(
-                    bgcolor="white10", 
-                    padding=15, 
-                    border_radius=10, 
+                    bgcolor="white10",
+                    padding=15,
+                    border_radius=10,
                     content=ft.Text(f"Admin: {user_name}\nAccess: {level.upper()}", color="white", size=12)
                 ),
                 ft.TextButton(
-                    "Secure Logout", 
-                    icon=ft.Icons.LOGOUT, 
-                    on_click=logout_action, 
+                    "Secure Logout",
+                    icon=ft.Icons.LOGOUT,
+                    on_click=logout_action,
                     style=ft.ButtonStyle(color="white70")
                 )
             ]
 
         elif role == "Doctor":
             sidebar_bg = "#004D40"
-
             sidebar_controls = [
                 ft.Text("DOCTOR PANEL", color="white", weight="bold", size=20),
                 ft.Divider(color="white24"),
-
-                ft.ListTile(title=ft.Text("OPD Queue", color="white"),
-                            on_click=lambda _: nav_to("doctor_dashboard")),
-
-                ft.ListTile(title=ft.Text("Admitted Patients", color="white"),
-                            on_click=lambda _: nav_to("doctor_ipd")),
-
-                ft.ListTile(title=ft.Text("Patient Medical Profile", color="white"),
-                            on_click=lambda _: nav_to("doctor_patient")),
-
-                ft.ListTile(title=ft.Text("Consultation", color="white"),
-                            on_click=lambda _: nav_to("doctor_consult")),
-
-                ft.ListTile(title=ft.Text("Prescriptions", color="white"),
-                            on_click=lambda _: nav_to("doctor_prescription")),
-
-                ft.ListTile(title=ft.Text("Lab Orders", color="white"),
-                            on_click=lambda _: nav_to("doctor_lab")),
-
-                ft.ListTile(title=ft.Text("Discharge", color="white"),
-                            on_click=lambda _: nav_to("doctor_discharge")),
-
+                ft.ListTile(title=ft.Text("OPD Queue", color="white"), on_click=lambda _: nav_to("doctor_dashboard")),
+                ft.ListTile(title=ft.Text("Admitted Patients", color="white"), on_click=lambda _: nav_to("doctor_ipd")),
+                ft.ListTile(title=ft.Text("Patient Medical Profile", color="white"), on_click=lambda _: nav_to("doctor_patient")),
+                ft.ListTile(title=ft.Text("Consultation", color="white"), on_click=lambda _: nav_to("doctor_consult")),
+                ft.ListTile(title=ft.Text("Prescriptions", color="white"), on_click=lambda _: nav_to("doctor_prescription")),
+                ft.ListTile(title=ft.Text("Lab Orders", color="white"), on_click=lambda _: nav_to("doctor_lab")),
+                ft.ListTile(title=ft.Text("Discharge", color="white"), on_click=lambda _: nav_to("doctor_discharge")),
                 ft.Container(expand=True),
-                ft.TextButton("Logout", on_click=logout_action)
-            ]   
+
+                ft.TextButton(
+                    "Logout",
+                    icon=ft.Icons.LOGOUT,
+                    on_click=logout_action,
+                    style=ft.ButtonStyle(color="white70")
+                )
+            ]
+
         elif role == "Lab Technician":
-            sidebar_bg = "#004D40"
+            sidebar_bg = "#0F766E"
             sidebar_controls = [
-                ft.Container(
-                    width=250,
-                    bgcolor="#0F766E",
-                    padding=20,
-                    content=ft.Column(
-                    controls=[
-                        ft.Text("LAB PANEL", size=22, weight="bold", color="white"),
-                        ft.Divider(color="white24"),
+                ft.Text("LAB PANEL", size=22, weight="bold", color="white"),
+                ft.Divider(color="white24"),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.DASHBOARD, color="white"),
+                    title=ft.Text("Lab Dashboard", color="white"),
+                    on_click=lambda _: nav_to("lab_dashboard")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.SCIENCE, color="white"),
+                    title=ft.Text("Test Catalog", color="white"),
+                    on_click=lambda _: nav_to("lab_catalog")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.LIST_ALT, color="white"),
+                    title=ft.Text("Lab Orders", color="white"),
+                    on_click=lambda _: nav_to("lab_orders")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.EDIT, color="white"),
+                    title=ft.Text("Enter Result", color="white"),
+                    on_click=lambda _: nav_to("lab_enter_result")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.HISTORY, color="white"),
+                    title=ft.Text("Result History", color="white"),
+                    on_click=lambda _: nav_to("lab_history")
+                ),
+                ft.Container(expand=True),
 
-                        ft.ListTile(
-                            leading=ft.Icon(ft.Icons.DASHBOARD, color="white"),
-                            title=ft.Text("Lab Dashboard", color="white"),
-                            on_click=lambda _: nav_to("lab_dashboard")
-                        ),
+                ft.TextButton(
+                    "Logout",
+                    icon=ft.Icons.LOGOUT,
+                    on_click=logout_action,
+                    style=ft.ButtonStyle(color="white70")
+                )
+            ]
 
-                        ft.ListTile(
-                            leading=ft.Icon(ft.Icons.SCIENCE, color="white"),
-                            title=ft.Text("Test Catalog", color="white"),
-                            on_click=lambda _: nav_to("lab_catalog")
-                        ),
+        elif role == "Pharmacist":
+            sidebar_bg = "#0F766E"
+            sidebar_controls = [
+                ft.Text("PHARMACY PANEL", color="white", weight="bold", size=20),
+                ft.Divider(color="white24"),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.DASHBOARD, color="white"),
+                    title=ft.Text("Dashboard", color="white"),
+                    on_click=lambda _: nav_to("pharma_dashboard")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.INVENTORY_2, color="white"),
+                    title=ft.Text("Inventory", color="white"),
+                    on_click=lambda _: nav_to("pharma_inventory")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.RECEIPT_LONG, color="white"),
+                    title=ft.Text("Prescriptions", color="white"),
+                    on_click=lambda _: nav_to("pharma_prescriptions")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.MEDICAL_INFORMATION, color="white"),
+                    title=ft.Text("Dispense", color="white"),
+                    on_click=lambda _: nav_to("pharma_dispense")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.PAYMENTS, color="white"),
+                    title=ft.Text("Invoices", color="white"),
+                    on_click=lambda _: nav_to("pharma_invoice")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.HISTORY, color="white"),
+                    title=ft.Text("Sales History", color="white"),
+                    on_click=lambda _: nav_to("pharma_sales")
+                ),
+                ft.Container(expand=True),
 
-                        ft.ListTile(
-                            leading=ft.Icon(ft.Icons.LIST_ALT, color="white"),
-                            title=ft.Text("Lab Orders", color="white"),
-                            on_click=lambda _: nav_to("lab_orders")
-                        ),
+                ft.TextButton(
+                    "Logout",
+                    icon=ft.Icons.LOGOUT,
+                    on_click=logout_action,
+                    style=ft.ButtonStyle(color="white70")
+                )
+            ]
 
-                        ft.ListTile(
-                            leading=ft.Icon(ft.Icons.EDIT, color="white"),
-                            title=ft.Text("Enter Result", color="white"),
-                            on_click=lambda _: nav_to("lab_enter_result")
-                        ),
-
-                        ft.ListTile(
-                            leading=ft.Icon(ft.Icons.HISTORY, color="white"),
-                            title=ft.Text("Result History", color="white"),
-                            on_click=lambda _: nav_to("lab_history")
-                        ),
-                    ]
-                    )
-                    )
-            ]     
         elif role == "Receptionist":
             sidebar_bg = ft.Colors.TEAL_900
             sidebar_controls = [
-                ft.Text("FRONT DESK", color="white", weight="bold", size=20), 
+                ft.Text("FRONT DESK", color="white", weight="bold", size=20),
                 ft.Divider(color="white24"),
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.HOME, color="white"), 
-                    title=ft.Text("Desk Overview", color="white"), 
-                    on_click=lambda _: nav_to("rec_overview")
-                ),
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.PERSON_ADD, color="white"), 
-                    title=ft.Text("Register Patient", color="white"), 
-                    on_click=lambda _: nav_to("reg_patient")
-                ),
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.CALENDAR_MONTH, color="white"), 
-                    title=ft.Text("Appointments Desk", color="white"), 
-                    on_click=lambda _: nav_to("book_appt")
-                ),
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.BED, color="white"), 
-                    title=ft.Text("IPD Admissions", color="white"), 
-                    on_click=lambda _: nav_to("admissions")
-                ),
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.PAYMENT, color="white"), 
-                    title=ft.Text("Process Billing", color="white"), 
-                    on_click=lambda _: nav_to("rec_billing")
-                ),
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED, color="white"), 
-                    title=ft.Text("All Patients", color="white"), 
-                    on_click=lambda _: nav_to("patients")
-                ),
+                ft.ListTile(leading=ft.Icon(ft.Icons.HOME, color="white"), title=ft.Text("Desk Overview", color="white"), on_click=lambda _: nav_to("rec_overview")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.PERSON_ADD, color="white"), title=ft.Text("Register Patient", color="white"), on_click=lambda _: nav_to("reg_patient")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.CALENDAR_MONTH, color="white"), title=ft.Text("Appointments Desk", color="white"), on_click=lambda _: nav_to("book_appt")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.BED, color="white"), title=ft.Text("IPD Admissions", color="white"), on_click=lambda _: nav_to("admissions")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.RECEIPT_LONG, color="white"), title=ft.Text("Billing Desk", color="white"), on_click=lambda _: nav_to("rec_billing")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED, color="white"), title=ft.Text("All Patients", color="white"), on_click=lambda _: nav_to("patients")),
                 ft.Container(expand=True),
                 ft.Container(
-                    bgcolor="white10", 
-                    padding=15, 
-                    border_radius=10, 
+                    bgcolor="white10",
+                    padding=15,
+                    border_radius=10,
                     content=ft.Text(f"Staff: {user_name}\nRole: Receptionist", color="white", size=12)
                 ),
                 ft.TextButton(
-                    "Secure Logout", 
-                    icon=ft.Icons.LOGOUT, 
-                    on_click=logout_action, 
+                    "Secure Logout",
+                    icon=ft.Icons.LOGOUT,
+                    on_click=logout_action,
+                    style=ft.ButtonStyle(color="white70")
+                )
+            ]
+
+        elif role == "Patient":
+            sidebar_bg = "#0F766E"
+            sidebar_controls = [
+                ft.Text("PATIENT PORTAL", color="white", weight="bold", size=20),
+                ft.Divider(color="white24"),
+                ft.ListTile(leading=ft.Icon(ft.Icons.DASHBOARD, color="white"), title=ft.Text("Dashboard", color="white"), on_click=lambda _: nav_to("patient_dashboard")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.PERSON, color="white"), title=ft.Text("My Profile", color="white"), on_click=lambda _: nav_to("patient_profile")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.EVENT_NOTE, color="white"), title=ft.Text("Appointments", color="white"), on_click=lambda _: nav_to("patient_appointments")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.MEDICAL_SERVICES, color="white"), title=ft.Text("Medical History", color="white"), on_click=lambda _: nav_to("patient_history")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.WARNING_AMBER, color="white"), title=ft.Text("Allergies", color="white"), on_click=lambda _: nav_to("patient_allergies")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.SCIENCE, color="white"), title=ft.Text("Lab Results", color="white"), on_click=lambda _: nav_to("patient_lab_results")),
+                ft.ListTile(leading=ft.Icon(ft.Icons.RECEIPT_LONG, color="white"), title=ft.Text("Bills & Payments", color="white"), on_click=lambda _: nav_to("patient_billing")),
+                ft.Container(expand=True),
+
+                ft.TextButton(
+                    "Logout",
+                    icon=ft.Icons.LOGOUT,
+                    on_click=logout_action,
                     style=ft.ButtonStyle(color="white70")
                 )
             ]
 
         sidebar = ft.Container(
-            width=280, 
-            bgcolor=sidebar_bg, 
-            padding=20, 
+            width=280,
+            bgcolor=sidebar_bg,
+            padding=20,
             content=ft.Column(controls=sidebar_controls)
         )
 
-        # -------------------------------------------------------------
-        # 5.2. MAIN WORKSPACE HEADER & ROUTING TITLES
-        # -------------------------------------------------------------
         nice_titles = {
-            "admin_overview": "Enterprise Dashboard", 
+            "admin_overview": "Enterprise Dashboard",
             "rec_overview": "Front Desk Operations",
-            "reg_patient": "Comprehensive Patient Registration", 
+            "reg_patient": "Comprehensive Patient Registration",
             "book_appt": "Appointment Scheduling & Queue",
-            "admissions": "IPD Admissions & Bed Allocation", 
+            "admissions": "IPD Admissions & Bed Allocation",
             "rec_billing": "Patient Billing & Invoicing",
-            "staff": "Human Resources & Staff Directory", 
+            "staff": "Human Resources & Staff Directory",
             "schedules": "Enterprise Staff Schedules",
             "patients": "Global Patient Directory",
-            "meds": "Pharmacy Inventory Control", 
-            "rooms": "Wards, Rooms & Bed Configuration", 
-            "billing": "Enterprise Revenue Overview",
-            "lab_dashboard": "Lab Technician Dashboard"
+            "meds": "Pharmacy Inventory Control",
+            "rooms": "Wards, Rooms & Bed Configuration",
+            "billing": "Billing Overview",
+            "lab_dashboard": "Lab Technician Dashboard",
+            "lab_catalog": "Test Catalog",
+            "lab_orders": "Lab Orders",
+            "lab_enter_result": "Enter Lab Result",
+            "lab_history": "Result History",
+            "pharma_dashboard": "Pharmacy Dashboard",
+            "pharma_inventory": "Medicine Inventory",
+            "pharma_prescriptions": "Doctor Prescriptions",
+            "pharma_dispense": "Dispense Medicines",
+            "pharma_invoice": "Pharmacy Invoice",
+            "pharma_sales": "Pharmacy Sales",
+            "patient_dashboard": "Patient Dashboard",
+            "patient_profile": "My Profile",
+            "patient_appointments": "Appointments",
+            "patient_history": "Medical History",
+            "patient_allergies": "Allergies",
+            "patient_lab_results": "Lab Results",
+            "patient_billing": "Bills & Payments",
         }
 
         header_banner = ft.Container(
@@ -740,7 +1187,7 @@ def main(page: ft.Page):
                 bgcolor=ft.Colors.BLUE_900, 
                 padding=40, 
                 border_radius=15, 
-                margin=ft.margin.only(),
+                margin=ft.Margin.only(),
                 content=ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN, 
                     controls=[
@@ -952,7 +1399,8 @@ def main(page: ft.Page):
             pid = page.session.store.get("selected_patient_id")
 
             if pid:
-                p = get_query_data("SELECT first_name, last_name FROM Patient WHERE patient_id=%s", (pid,))
+                p = get_query_data("SELECT first_name, last_name, admission_id FROM Patient join Admission ON Patient.patient_id = Admission.patient_id WHERE Patient.patient_id=%s",
+                                    (pid,))
                 if p:
                     content_controls.append(
                         ft.Container(
@@ -961,7 +1409,7 @@ def main(page: ft.Page):
                             content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
                         )
                     )
-            admission_id = ft.TextField(label="Admission ID")
+            admission_id = ft.Dropdown(label="Admission ID", width=300)
             notes = ft.TextField(label="Discharge Notes")
 
             def discharge(e):
@@ -1364,39 +1812,40 @@ def main(page: ft.Page):
                 )
             )
                    
-        
-        # =========================
-        # LAB HELPERS
-        # =========================
-        # def fmt_dt(v):
-        #     return str(v)[:16] if v else "N/A"
+        elif tab == "doctor_lab":
 
-        # def priority_bg(priority_value):
-        #     if priority_value == "STAT":
-        #         return ft.Colors.RED_500
-        #     if priority_value == "Urgent":
-        #         return ft.Colors.ORANGE_500
-        #     return ft.Colors.GREEN_500
+            rows = get_query_data("""
+                SELECT 
+                    lo.order_id,
+                    p.first_name,
+                    p.last_name,
+                    lo.ordered_at,
+                    lo.status
+                FROM LabOrder lo
+                JOIN Patient p ON lo.patient_id = p.patient_id
+                ORDER BY lo.order_id DESC
+            """)
 
-        # def status_bg(status_value):
-        #     if status_value == "Completed":
-        #         return ft.Colors.GREEN_700
-        #     if status_value == "Processing":
-        #         return ft.Colors.BLUE_700
-        #     if status_value == "Sample Collected":
-        #         return ft.Colors.ORANGE_700
-        #     if status_value == "Cancelled":
-        #         return ft.Colors.RED_700
-        #     return ft.Colors.GREY_700
+            content_controls.append(ft.Text("Lab Orders", size=22, weight="bold"))
 
-        # def update_order_status(order_id, new_status):
-        #     execute_query(
-        #         "UPDATE LabOrder SET status=%s WHERE order_id=%s",
-        #         (new_status, order_id)
-        #     )
-        #     show_snack("Order status updated", ft.Colors.GREEN)
-        #     nav_to("lab_orders")
-
+            if not rows:
+                content_controls.append(ft.Text("No lab orders found"))
+            else:
+                for r in rows:
+                    content_controls.append(
+                        ft.Container(
+                            padding=12,
+                            margin=ft.Margin.only(bottom=10),
+                            border_radius=10,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(f"Order #{r['order_id']} - {r['first_name']} {r['last_name']}", weight="bold"),
+                                ft.Text(f"Date: {r['ordered_at']}", size=12),
+                                ft.Text(f"Status: {r['status']}")
+                            ])
+                        )
+                    )
+       
         elif tab == "lab_dashboard":
             lab_tech_id = page.session.store.get("lab_tech_id")
 
@@ -1855,14 +2304,776 @@ def main(page: ft.Page):
 
             content_controls.append(
                 ft.Column(result_cards, spacing=0)
-            )               
+            )  
+        elif tab == "pharma_dashboard":
+            meds = get_query_data("SELECT COUNT(*) AS c FROM Medicine")
+            low_stock = get_query_data("SELECT COUNT(*) AS c FROM Medicine WHERE stock_quantity <= reorder_level")
+            expiring = get_query_data("SELECT COUNT(*) AS c FROM Medicine WHERE expiry_date <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)")
+            prescriptions = get_query_data("SELECT COUNT(*) AS c FROM Prescription")
+            dispenses = get_query_data("SELECT COUNT(*) AS c FROM PharmacyDispense")
+            invoices = get_query_data("SELECT COUNT(*) AS c FROM Invoice")
+
+            total_meds = meds[0]["c"] if meds else 0
+            low_stock_count = low_stock[0]["c"] if low_stock else 0
+            expiring_count = expiring[0]["c"] if expiring else 0
+            total_prescriptions = prescriptions[0]["c"] if prescriptions else 0
+            total_dispenses = dispenses[0]["c"] if dispenses else 0
+            total_invoices = invoices[0]["c"] if invoices else 0
+
+            content_controls.append(
+                ft.Container(
+                    padding=16,
+                    border_radius=12,
+                    bgcolor=ft.Colors.TEAL_50,
+                    content=ft.Column([
+                        ft.Text("Pharmacy Dashboard", size=24, weight="bold"),
+                        ft.Text("Inventory, prescriptions, dispensing, invoices, and sales in one place."),
+                        ft.Row(
+                            controls=[
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Medicines", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_meds), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Low Stock", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(low_stock_count), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Expiring", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(expiring_count), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Prescriptions", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_prescriptions), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Dispenses", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_dispenses), size=22, weight="bold")
+                                    ])
+                                ),
+                                ft.Container(
+                                    padding=12,
+                                    border_radius=10,
+                                    bgcolor=ft.Colors.WHITE,
+                                    width=170,
+                                    content=ft.Column([
+                                        ft.Text("Invoices", size=12, color=ft.Colors.GREY_600),
+                                        ft.Text(str(total_invoices), size=22, weight="bold")
+                                    ])
+                                ),
+                            ],
+                            spacing=10
+                        )
+                    ])
+                )
+            )
+
+            content_controls.append(
+                ft.Row(
+                    controls=[
+                        ft.FilledButton("Inventory", on_click=lambda e: nav_to("pharma_inventory")),
+                        ft.FilledButton("Prescriptions", on_click=lambda e: nav_to("pharma_prescriptions")),
+                        ft.FilledButton("Dispense", on_click=lambda e: nav_to("pharma_dispense")),
+                        ft.FilledButton("Invoices", on_click=lambda e: nav_to("pharma_invoice")),
+                        ft.FilledButton("Sales", on_click=lambda e: nav_to("pharma_sales")),
+                    ],
+                    spacing=12
+                )
+            )                 
+        elif tab == "pharma_inventory":
+            meds, groups = get_medicine_category_groups()
+
+            content_controls.append(ft.Text("Medicine Inventory", size=20, weight="bold"))
+
+            if not groups:
+                content_controls.append(ft.Text("No medicines found"))
+            else:
+                for cat_name, items in groups.items():
+                    cards = []
+                    for m in items:
+                        stock_status = "Low Stock" if m["stock_quantity"] <= m["reorder_level"] else "In Stock"
+                        expiry_text = fmt_dt(m.get("expiry_date"))
+                        cards.append(
+                            ft.Container(
+                                padding=12,
+                                margin=ft.Margin.only(bottom=8),
+                                border_radius=10,
+                                bgcolor=ft.Colors.GREY_100,
+                                content=ft.Column([
+                                    ft.Row(
+                                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                        controls=[
+                                            ft.Text(m["medicine_name"], weight="bold"),
+                                            ft.Container(
+                                                padding=6,
+                                                border_radius=8,
+                                                bgcolor=ft.Colors.RED_400 if stock_status == "Low Stock" else ft.Colors.GREEN_500,
+                                                content=ft.Text(stock_status, color=ft.Colors.WHITE, weight="bold")
+                                            )
+                                        ]
+                                    ),
+                                    ft.Text(f"Generic: {m.get('generic_name') or 'N/A'} | Brand: {m.get('brand_name') or 'N/A'}"),
+                                    ft.Text(f"Form: {m.get('dosage_form') or 'N/A'} | Strength: {m.get('strength') or 'N/A'}"),
+                                    ft.Text(f"Category: {cat_name} | Unit Price: ₹{m.get('unit_price')}"),
+                                    ft.Text(f"Stock: {m.get('stock_quantity')} | Reorder Level: {m.get('reorder_level')}"),
+                                    ft.Text(f"Expiry: {expiry_text} | Storage: {m.get('storage_condition') or 'N/A'}"),
+                                    ft.Text(f"Prescription Required: {'Yes' if m.get('prescription_required') else 'No'}"),
+                                ])
+                            )
+                        )
+
+                    content_controls.append(
+                        ft.Container(
+                            padding=14,
+                            margin=ft.Margin.only(bottom=12),
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(cat_name, size=16, weight="bold"),
+                                *cards
+                            ])
+                        )
+                    )
+        
+        elif tab == "pharma_sales":
+
+    # 🔹 FETCH ONLY PHARMACY INVOICES
+            invoices = get_query_data("""
+                SELECT *
+                FROM Invoice
+                WHERE bill_type = 'PHARMACY'
+                ORDER BY invoice_date DESC
+            """)
+
+            # 🔹 TOTAL PAID
+            total_sales = get_query_data("""
+                SELECT COALESCE(SUM(total_amount), 0) AS s
+                FROM Invoice
+                WHERE bill_type = 'PHARMACY'
+                AND payment_status = 'Paid'
+            """)
+
+            # 🔹 TOTAL DUE
+            total_due = get_query_data("""
+                SELECT COALESCE(SUM(due_amount), 0) AS s
+                FROM Invoice
+                WHERE bill_type = 'PHARMACY'
+                AND payment_status != 'Paid'
+            """)
+
+            sales_value = total_sales[0]["s"] if total_sales else 0
+            due_value = total_due[0]["s"] if total_due else 0
+
+            content_controls.append(ft.Text("Pharmacy Sales", size=22, weight="bold"))
+
+            content_controls.append(
+                ft.Row([
+                    ft.Container(
+                        padding=12,
+                        border_radius=10,
+                        bgcolor=ft.Colors.GREEN_100,
+                        content=ft.Text(f"Total Paid Sales: ₹{sales_value}", weight="bold")
+                    ),
+                    ft.Container(
+                        padding=12,
+                        border_radius=10,
+                        bgcolor=ft.Colors.RED_100,
+                        content=ft.Text(f"Pending Due: ₹{due_value}", weight="bold")
+                    )
+                ], spacing=12)
+            )
+
+            if invoices:
+                for inv in invoices:
+
+                    mode_dd = ft.Dropdown(
+                        width=150,
+                        options=[
+                            ft.dropdown.Option("Cash"),
+                            ft.dropdown.Option("UPI"),
+                            ft.dropdown.Option("Card"),
+                            ft.dropdown.Option("Insurance"),
+                        ],
+                        value=inv.get("payment_mode") or "Cash"
+                    )
+
+                    content_controls.append(
+                        ft.Container(
+                            padding=12,
+                            margin=ft.Margin.only(bottom=10),
+                            bgcolor=ft.Colors.WHITE,
+                            border_radius=10,
+                            content=ft.Column([
+                                ft.Text(f"{inv['invoice_number']}", weight="bold"),
+                                ft.Text(f"Date: {fmt_dt(inv.get('invoice_date'))}"),
+                                ft.Text(f"Total: ₹{inv['total_amount']} | Paid: ₹{inv['paid_amount']} | Due: ₹{inv['due_amount']}"),
+                                ft.Text(f"Payment: {inv['payment_status']} | Mode: {inv.get('payment_mode') or 'N/A'}"),
+                                ft.Text(f"Notes: {inv.get('notes') or 'N/A'}"),
+
+                                ft.Row([
+                                    mode_dd,
+                                    ft.FilledButton(
+                                        "Mark Paid",
+                                        on_click=lambda e, iid=inv["invoice_id"], dd=mode_dd:
+                                            mark_invoice_paid(iid, dd.value)
+                                    )
+                                ])
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No pharmacy invoices found"))
+        elif tab == "pharma_invoice":
+
+            pharmacist_id = page.session.store.get("pharmacist_id")
+            if not pharmacist_id:
+                content_controls.append(ft.Text("Pharmacist session missing. Please log in again."))
+                return
+
+            # =========================
+            # LOAD DISPENSE LIST
+            # =========================
+            dispenses = get_query_data("""
+                SELECT
+                    pd.dispense_id,
+                    p.first_name,
+                    p.last_name,
+                    pd.dispensed_at,
+                    pd.payment_status
+                FROM PharmacyDispense pd
+                JOIN Patient p ON pd.patient_id = p.patient_id
+                ORDER BY pd.dispensed_at DESC
+            """)
+
+            dispense_dd = ft.Dropdown(
+                label="Select Dispense",
+                width=420,
+                options=[
+                    ft.dropdown.Option(
+                        key=str(d["dispense_id"]),
+                        text=f"Dispense #{d['dispense_id']} | {d['first_name']} {d['last_name']} | {d['payment_status']}"
+                    )
+                    for d in (dispenses or [])
+                ]
+            )
+
+            collect_now_sw = ft.Switch(label="Collect Payment Now", value=True)
+
+            payment_mode_dd = ft.Dropdown(
+                label="Payment Mode",
+                width=220,
+                options=[
+                    ft.dropdown.Option("Cash"),
+                    ft.dropdown.Option("UPI"),
+                    ft.dropdown.Option("Card"),
+                    ft.dropdown.Option("Insurance"),
+                ],
+                value="Cash"
+            )
+
+            preview = ft.Column(spacing=8)
+
+            # =========================
+            # LOAD PREVIEW
+            # =========================
+            def load_dispense_preview(e):
+
+                preview.controls.clear()
+
+                # 🔹 Check selection
+                if not dispense_dd.value:
+                    preview.controls.append(ft.Text("Select a dispense first"))
+                    preview.update()
+                    return
+
+                did = int(dispense_dd.value)
+
+                # 🔹 Fetch medicines
+                lines = get_query_data("""
+                    SELECT
+                        di.quantity,
+                        di.unit_price,
+                        m.medicine_name
+                    FROM DispenseItem di
+                    JOIN Medicine m ON di.medicine_id = m.medicine_id
+                    WHERE di.dispense_id = %s
+                    ORDER BY di.dispense_item_id
+                """, (did,))
+
+                if not lines:
+                    preview.controls.append(ft.Text("No dispense items found"))
+                    preview.update()
+                    return
+
+                # 🔹 Calculate total
+                total = 0
+
+                for l in lines:
+                    item_total = l["quantity"] * l["unit_price"]
+                    total += item_total
+
+                    preview.controls.append(
+                        ft.Text(
+                            f"{l['medicine_name']} | Qty: {l['quantity']} | ₹{l['unit_price']} | Total ₹{item_total}"
+                        )
+                    )
+
+                preview.controls.append(
+                    ft.Text(f"Grand Total: ₹{total}", weight="bold")
+                )
+
+                preview.update()
+
+            # =========================
+            # GENERATE INVOICE
+            # =========================
+            def generate_pharmacy_invoice(e):
+
+                if not dispense_dd.value:
+                    show_snack("Select dispense first", ft.Colors.RED)
+                    return
+
+                lines = get_query_data("""
+                    SELECT di.quantity, di.unit_price, m.medicine_name
+                    FROM DispenseItem di
+                    JOIN Medicine m ON di.medicine_id = m.medicine_id
+                    WHERE di.dispense_id = %s
+                """, (dispense_dd.value,))
+                
+                row = get_query_data("""
+                    SELECT patient_id
+                    FROM PharmacyDispense
+                    WHERE dispense_id = %s
+                """, (dispense_dd.value,))
+
+                if not row:
+                    show_snack("Dispense not found", ft.Colors.RED)
+                    return
+
+                patient_id = row[0]["patient_id"]
+                items = []
+                total = 0
+
+                for l in lines:
+                    item_total = l["quantity"] * l["unit_price"]
+                    total += item_total
+
+                    items.append({
+                        "item_type": "Medicine",
+                        "description": l["medicine_name"],
+                        "quantity": int(l["quantity"]),
+                        "unit_price": float(l["unit_price"])
+                    })
+
+                # ✅ SAVE INVOICE
+                invoice_id = save_invoice_record(
+                patient_id=patient_id,
+                bill_type="PHARMACY",   # ✅ HARD CODE THIS
+                items=items,
+                collect_now=collect_now_sw.value,
+                payment_mode=payment_mode_dd.value,
+                notes=f"Dispense {dispense_dd.value}",
+                dispense_id=dispense_dd.value
+                )
+
+                print("INVOICE ID:", invoice_id)   # ✅ DEBUG
+                if invoice_id:
+                    show_snack("Invoice Created", ft.Colors.GREEN)
+                    nav_to("pharma_sales")   # ✅ REFRESH SCREEN
+                if invoice_id:
+                    pdf_path = generate_invoice_pdf(invoice_id, items, total)
+                    show_snack(f"PDF Saved: {pdf_path}", ft.Colors.GREEN)
+
+                    import os
+                    os.startfile(pdf_path)
+
+            # =========================
+            # UI
+            # =========================
+            content_controls.append(ft.Text("Pharmacy Invoice", size=24, weight="bold"))
+
+            content_controls.append(
+                ft.Container(
+                    padding=16,
+                    border_radius=12,
+                    bgcolor=ft.Colors.WHITE,
+                    content=ft.Column([
+                        dispense_dd,
+                        ft.Row([collect_now_sw, payment_mode_dd], spacing=12),
+                        ft.Row([
+                            ft.FilledButton("Load Preview", on_click=load_dispense_preview),
+                            ft.FilledButton("Generate Invoice", on_click=generate_pharmacy_invoice)
+                        ], spacing=12),
+                        ft.Divider(),
+                        ft.Text("Preview", weight="bold"),
+                        preview
+                    ], spacing=12)
+                )
+            )
+        
+
+        elif tab == "pharma_dispense":
+            pharmacist_id = page.session.store.get("pharmacist_id")
+            selected_prescription_id = page.session.store.get("selected_prescription_id")
+
+            if not pharmacist_id:
+                content_controls.append(ft.Text("Pharmacist session missing. Please log in again."))
+                return
+
+            prescriptions = get_query_data("""
+                SELECT
+                    p.prescription_id,
+                    pt.first_name,
+                    pt.last_name,
+                    p.prescribed_at
+                FROM Prescription p
+                JOIN Patient pt ON p.patient_id = pt.patient_id
+                ORDER BY p.prescribed_at DESC
+            """)
+
+            prescription_dd = ft.Dropdown(
+                label="Select Prescription",
+                width=420,
+                value=str(selected_prescription_id) if selected_prescription_id else None,
+                options=[
+                    ft.dropdown.Option(
+                        key=str(p["prescription_id"]),
+                        text=f"#{p['prescription_id']} | {p['first_name']} {p['last_name']} | {fmt_dt(p.get('prescribed_at'))}"
+                    )
+                    for p in (prescriptions or [])
+                ]
+            )
+
+            items_area = ft.Column(spacing=10)
+            qty_inputs = []
+
+            def load_items(e):
+                qty_inputs.clear()
+                items_area.controls.clear()
+
+                if not prescription_dd.value:
+                    items_area.controls.append(ft.Text("Select a prescription first"))
+                    items_area.update()
+                    return
+
+                page.session.store.set("selected_prescription_id", prescription_dd.value)
+
+                items = get_query_data("""
+                    SELECT
+                        pi.item_id,
+                        pi.medicine_id,
+                        m.medicine_name,
+                        m.unit_price,
+                        m.stock_quantity,
+                        pi.dosage,
+                        pi.frequency,
+                        pi.duration_days
+                    FROM PrescriptionItem pi
+                    JOIN Medicine m ON pi.medicine_id = m.medicine_id
+                    WHERE pi.prescription_id = %s
+                    ORDER BY pi.item_id
+                """, (prescription_dd.value,))
+
+                if not items:
+                    items_area.controls.append(ft.Text("No medicines found in this prescription"))
+                    items_area.update()
+                    return
+
+                for it in items:
+                    qty = ft.TextField(label="Qty", width=100, value="1")
+                    qty_inputs.append((it, qty))
+                    items_area.controls.append(
+                        ft.Container(
+                            padding=12,
+                            border_radius=10,
+                            bgcolor=ft.Colors.GREY_100,
+                            content=ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                controls=[
+                                    ft.Column([
+                                        ft.Text(it["medicine_name"], weight="bold"),
+                                        ft.Text(f"Dosage: {it.get('dosage') or 'N/A'}"),
+                                        ft.Text(f"Frequency: {it.get('frequency') or 'N/A'}"),
+                                        ft.Text(f"Duration: {it.get('duration_days') or 'N/A'} days"),
+                                        ft.Text(f"Unit Price: ₹{it.get('unit_price')}"),
+                                        ft.Text(f"Stock Available: {it.get('stock_quantity')}"),
+                                    ]),
+                                    qty
+                                ]
+                            )
+                        )
+                    )
+
+                items_area.update()
+
+            def save_dispense(e):
+                if not prescription_dd.value:
+                    show_snack("Select a prescription first", ft.Colors.RED)
+                    return
+
+                if not qty_inputs:
+                    show_snack("Load prescription items first", ft.Colors.RED)
+                    return
+
+                conn = get_db_connection()
+                if not conn:
+                    return
+
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT patient_id FROM Prescription WHERE prescription_id=%s",
+                        (prescription_dd.value,)
+                    )
+                    p_row = cursor.fetchone()
+                    if not p_row:
+                        raise Exception("Prescription not found")
+
+                    patient_id = p_row[0]
+                    total_amount = 0.0
+
+                    cursor.execute("""
+                        INSERT INTO PharmacyDispense (
+                            prescription_id, patient_id, pharmacist_id,
+                            dispensed_at, total_amount, payment_status
+                        )
+                        VALUES (%s, %s, %s, NOW(), 0, 'Pending')
+                    """, (prescription_dd.value, patient_id, pharmacist_id))
+
+                    dispense_id = cursor.lastrowid
+
+                    for it, qty_field in qty_inputs:
+                        qty = int(qty_field.value or 0)
+                        if qty <= 0:
+                            continue
+
+                        stock = int(it["stock_quantity"] or 0)
+                        if qty > stock:
+                            raise Exception(f"Insufficient stock for {it['medicine_name']}")
+
+                        unit_price = float(it["unit_price"] or 0)
+                        line_total = qty * unit_price
+                        total_amount += line_total
+
+                        cursor.execute("""
+                            INSERT INTO DispenseItem (
+                                dispense_id, medicine_id, quantity, unit_price, total_price
+                            )
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (dispense_id, it["medicine_id"], qty, unit_price, line_total))
+
+                        cursor.execute("""
+                            UPDATE Medicine
+                            SET stock_quantity = stock_quantity - %s
+                            WHERE medicine_id = %s
+                        """, (qty, it["medicine_id"]))
+
+                    cursor.execute("""
+                        UPDATE PharmacyDispense
+                        SET total_amount = %s
+                        WHERE dispense_id = %s
+                    """, (total_amount, dispense_id))
+
+                    conn.commit()
+                    show_snack(f"Dispensed successfully. Total ₹{total_amount:.2f}", ft.Colors.GREEN)
+                    nav_to("pharma_invoice")
+                except Exception as ex:
+                    conn.rollback()
+                    show_snack(f"Dispense error: {ex}", ft.Colors.RED)
+                finally:
+                    cursor.close()
+                    conn.close()
+
+            content_controls.append(ft.Text("Dispense Medicines", size=20, weight="bold"))
+            content_controls.append(
+                ft.Container(
+                    padding=14,
+                    border_radius=12,
+                    bgcolor=ft.Colors.WHITE,
+                    content=ft.Column([
+                        prescription_dd,
+                        ft.Row([
+                            ft.FilledButton("Load Prescription Items", on_click=load_items),
+                            ft.FilledButton("Save Dispense", on_click=save_dispense)
+                        ], spacing=12),
+                        items_area
+                    ], spacing=12)
+                )
+            )
+
+        elif tab == "pharma_prescriptions":
+            prescriptions = get_query_data("""
+                SELECT
+                    p.prescription_id,
+                    p.prescribed_at,
+                    p.valid_till,
+                    p.notes,
+                    pt.first_name,
+                    pt.last_name,
+                    d.first_name AS doctor_first,
+                    d.last_name AS doctor_last
+                FROM Prescription p
+                JOIN Patient pt ON p.patient_id = pt.patient_id
+                JOIN Doctor d ON p.doctor_id = d.doctor_id
+                ORDER BY p.prescribed_at DESC
+            """)
+
+            content_controls.append(ft.Text("Doctor Prescriptions", size=20, weight="bold"))
+
+            if not prescriptions:
+                content_controls.append(ft.Text("No prescriptions found"))
+            else:
+                for p in prescriptions:
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(f"{p['first_name']} {p['last_name']}", size=16, weight="bold"),
+                                ft.Text(f"Prescription ID: {p['prescription_id']}"),
+                                ft.Text(f"Doctor: Dr. {p['doctor_first']} {p['doctor_last']}"),
+                                ft.Text(f"Prescribed At: {fmt_dt(p.get('prescribed_at'))}"),
+                                ft.Text(f"Valid Till: {fmt_dt(p.get('valid_till'))}"),
+                                ft.Text(f"Notes: {p.get('notes') or 'N/A'}"),
+                                ft.FilledButton(
+                                    "Open in Dispense",
+                                    on_click=lambda e, pid=p["prescription_id"]: (
+                                        page.session.store.set("selected_prescription_id", pid),
+                                        nav_to("pharma_dispense")
+                                    )
+                                )
+                            ])
+                        )
+                    )
+        elif tab == "billing":
+
+            stats = get_query_data("""
+                SELECT
+                    COUNT(*) AS total_bills,
+                    SUM(CASE WHEN payment_status = 'Paid' THEN 1 ELSE 0 END) AS paid_bills,
+                    SUM(CASE WHEN payment_status != 'Paid' THEN 1 ELSE 0 END) AS unpaid_bills,
+                    COALESCE(SUM(total_amount), 0) AS total_amount,
+                    COALESCE(SUM(due_amount), 0) AS due_amount
+                FROM Invoice
+                WHERE bill_type IN ('OPD','LAB','IPD')
+            """)
+
+            s = stats[0] if stats else {}
+
+            # 🔹 FETCH INVOICES
+            invoices = get_query_data("""
+                SELECT
+                    i.invoice_id,
+                    i.invoice_number,
+                    i.bill_type,
+                    i.invoice_date,
+                    p.first_name,
+                    p.last_name,
+                    i.total_amount,
+                    i.paid_amount,
+                    i.due_amount,
+                    i.payment_status,
+                    i.payment_mode,
+                    i.notes
+                FROM Invoice i
+                JOIN Patient p ON i.patient_id = p.patient_id
+                WHERE i.bill_type IN ('OPD','LAB','IPD')   -- 🔥 IMPORTANT
+                ORDER BY i.invoice_date DESC
+            """)
+
+            content_controls.append(ft.Text("Billing Overview", size=24, weight="bold"))
+
+            # 🔹 SUMMARY
+            content_controls.append(
+                ft.Row([
+                    ft.Text(f"Total: {s.get('total_bills', 0)}"),
+                    ft.Text(f"Paid: {s.get('paid_bills', 0)}"),
+                    ft.Text(f"Unpaid: {s.get('unpaid_bills', 0)}"),
+                    ft.Text(f"Amount: ₹{s.get('total_amount', 0)}"),
+                    ft.Text(f"Due: ₹{s.get('due_amount', 0)}"),
+                ], spacing=20)
+            )
+
+            content_controls.append(ft.Divider())
+
+            # 🔹 LIST
+            if invoices:
+                for inv in invoices:
+
+                    mode_dd = ft.Dropdown(
+                        width=150,
+                        options=[
+                            ft.dropdown.Option("Cash"),
+                            ft.dropdown.Option("UPI"),
+                            ft.dropdown.Option("Card"),
+                            ft.dropdown.Option("Insurance"),
+                        ],
+                        value=inv.get("payment_mode") or "Cash"
+                    )
+
+                    content_controls.append(
+                        ft.Container(
+                            padding=12,
+                            margin=ft.Margin.only(bottom=10),
+                            bgcolor=ft.Colors.WHITE,
+                            border_radius=10,
+                            content=ft.Column([
+                                ft.Text(f"{inv['invoice_number']} | {inv['bill_type']}", weight="bold"),
+                                ft.Text(f"{inv['first_name']} {inv['last_name']}"),
+                                ft.Text(f"Total: ₹{inv['total_amount']} | Paid: ₹{inv['paid_amount']} | Due: ₹{inv['due_amount']}"),
+                                ft.Text(f"Payment: {inv['payment_status']}"),
+
+                                ft.Row([
+                                    mode_dd,
+                                    ft.FilledButton(
+                                        "Mark Paid",
+                                        on_click=lambda e, iid=inv["invoice_id"], dd=mode_dd:
+                                            mark_invoice_paid(iid, dd.value)
+                                    )
+                                ])
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No billing records found"))
 
         elif tab == "rec_overview":
             banner = ft.Container(
                 bgcolor=ft.Colors.TEAL_700, 
                 padding=40, 
                 border_radius=15, 
-                margin=ft.margin.only(bottom=20),
+                margin= ft.Margin.only(bottom=20),
                 content=ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN, 
                     controls=[
@@ -1921,7 +3132,341 @@ def main(page: ft.Page):
                     controls=[appt_card, bill_card]
                 )
             )
+        elif tab == "rec_billing":
 
+            content_controls.append(
+                ft.Text("Billing Desk", size=24, weight="bold")
+            )
+
+            preview_area = ft.Column(spacing=8)
+            extra_items = []
+
+            bill_type_dd = ft.Dropdown(
+                label="Bill Type",
+                width=200,
+                options=[
+                    ft.dropdown.Option("OPD"),
+                    ft.dropdown.Option("LAB"),
+                    ft.dropdown.Option("IPD"),
+                ],
+                value="OPD"
+            )
+
+            source_dd = ft.Dropdown(
+                label="Select Source",
+                width=300
+            )
+            extra_desc = ft.TextField(
+                label="Extra Charge Description",
+                width=250
+            )
+
+            extra_qty = ft.TextField(
+                label="Qty",
+                width=100,
+                value="1"
+            )
+
+            extra_rate = ft.TextField(
+                label="Unit Price",
+                width=120
+            )
+            # =========================
+            # REQUIRED CONTROLS
+            # =========================
+
+            bill_type_dd = ft.Dropdown(
+                label="Bill Type",
+                width=200,
+                value="OPD",
+                options=[
+                    ft.dropdown.Option("OPD"),
+                    ft.dropdown.Option("LAB"),
+                    ft.dropdown.Option("IPD"),
+                ]
+            )
+
+            source_dd = ft.Dropdown(
+                label="Select Source",
+                width=300
+            )
+
+            collect_now_sw = ft.Switch(
+                label="Collect Payment Now",
+                value=False
+            )
+
+            payment_mode_dd = ft.Dropdown(
+                label="Payment Mode",
+                width=200,
+                options=[
+                    ft.dropdown.Option("Cash"),
+                    ft.dropdown.Option("UPI"),
+                    ft.dropdown.Option("Card"),
+                    ft.dropdown.Option("Insurance"),
+                ],
+                value="Cash"
+            )
+
+            extra_desc = ft.TextField(label="Extra Description", width=250)
+            extra_qty = ft.TextField(label="Qty", width=100, value="1")
+            extra_rate = ft.TextField(label="Unit Price", width=120)
+
+            preview_area = ft.Column(spacing=8)
+            extra_items = []
+
+            # =========================
+            # LOAD SOURCES
+            # =========================
+            def load_sources(e):
+                bill_type = bill_type_dd.value
+
+                if bill_type == "OPD":
+                    rows = get_query_data("""
+                        SELECT c.consultation_id, p.first_name, p.last_name
+                        FROM Consultation c
+                        JOIN Patient p ON c.patient_id = p.patient_id
+                        ORDER BY c.consultation_id DESC
+                    """) or []
+
+                    source_dd.options = [
+                        ft.dropdown.Option(
+                            key=str(r["consultation_id"]),
+                            text=f"Consult #{r['consultation_id']} | {r['first_name']} {r['last_name']}"
+                        )
+                        for r in rows
+                    ]
+
+                elif bill_type == "LAB":
+                    rows = get_query_data("""
+                        SELECT lo.order_id, p.first_name, p.last_name
+                        FROM LabOrder lo
+                        JOIN Patient p ON lo.patient_id = p.patient_id
+                        ORDER BY lo.order_id DESC
+                    """) or []
+
+                    source_dd.options = [
+                        ft.dropdown.Option(
+                            key=str(r["order_id"]),
+                            text=f"Lab Order #{r['order_id']} | {r['first_name']} {r['last_name']}"
+                        )
+                        for r in rows
+                    ]
+
+                elif bill_type == "IPD":
+                    rows = get_query_data("""
+                        SELECT a.admission_id, p.first_name, p.last_name
+                        FROM Admission a
+                        JOIN Patient p ON a.patient_id = p.patient_id
+                        ORDER BY a.admission_id DESC
+                    """) or []
+
+                    source_dd.options = [
+                        ft.dropdown.Option(
+                            key=str(r["admission_id"]),
+                            text=f"Admission #{r['admission_id']} | {r['first_name']} {r['last_name']}"
+                        )
+                        for r in rows
+                    ]
+
+                source_dd.value = None
+                page.update()
+
+            # =========================
+            # ADD EXTRA CHARGE
+            # =========================
+            def add_extra_charge(e):
+                try:
+                    extra_items.append({
+                        "item_type": "Extra",
+                        "description": extra_desc.value,
+                        "quantity": int(extra_qty.value),
+                        "unit_price": float(extra_rate.value)
+                    })
+
+                    preview_area.controls.append(
+                        ft.Text(f"Added: {extra_desc.value} | Qty {extra_qty.value} | ₹{extra_rate.value}")
+                    )
+                    page.update()
+                except:
+                    show_snack("Invalid extra charge", ft.Colors.RED)
+
+            # =========================
+            # GENERATE BILL
+            # =========================
+            def generate_bill(e):
+
+                if not source_dd.value:
+                    show_snack("Select source first", ft.Colors.RED)
+                    return
+
+                bill_type = bill_type_dd.value
+                items = []
+                patient_id = None
+                consultation_id = None
+                lab_order_id = None
+                admission_id = None
+
+                # ---------- OPD ----------
+                if bill_type == "OPD":
+                    row = get_query_data("""
+                        SELECT consultation_id, patient_id
+                        FROM Consultation
+                        WHERE consultation_id = %s
+                    """, (source_dd.value,))
+
+                    if not row:
+                        show_snack("Consultation not found", ft.Colors.RED)
+                        return
+
+                    r = row[0]
+                    patient_id = r["patient_id"]
+                    consultation_id = r["consultation_id"]
+
+                    items.append({
+                        "item_type": "Consultation",
+                        "description": "Doctor Consultation",
+                        "quantity": 1,
+                        "unit_price": 500
+                    })
+
+                # ---------- LAB ----------
+                elif bill_type == "LAB":
+                    row = get_query_data("""
+                        SELECT patient_id FROM LabOrder WHERE order_id = %s
+                    """, (source_dd.value,))
+
+                    if not row:
+                        show_snack("Lab order not found", ft.Colors.RED)
+                        return
+
+                    patient_id = row[0]["patient_id"]
+                    lab_order_id = int(source_dd.value)
+
+                    tests = get_query_data("""
+                        SELECT t.test_name, t.price
+                        FROM LabOrderItem li
+                        JOIN LabTest t ON li.test_id = t.test_id
+                        WHERE li.order_id = %s
+                    """, (source_dd.value,))
+
+                    for t in tests:
+                        items.append({
+                            "item_type": "Lab",
+                            "description": t["test_name"],
+                            "quantity": 1,
+                            "unit_price": float(t["price"])
+                        })
+
+                # ---------- IPD ----------
+                elif bill_type == "IPD":
+                    row = get_query_data("""
+                        SELECT
+                            a.admission_id, a.patient_id,
+                            a.admission_date, a.discharge_date,
+                            r.room_number, r.daily_charge
+                        FROM Admission a
+                        JOIN Bed b ON a.bed_id = b.bed_id
+                        JOIN Room r ON b.room_id = r.room_id
+                        WHERE a.admission_id = %s
+                    """, (source_dd.value,))
+
+                    if not row:
+                        show_snack("Admission not found", ft.Colors.RED)
+                        return
+
+                    r = row[0]
+                    patient_id = r["patient_id"]
+                    admission_id = r["admission_id"]
+
+                    start = r["admission_date"]
+                    end = r["discharge_date"] or datetime.datetime.now()
+                    days = max(1, (end.date() - start.date()).days)
+
+                    items.append({
+                        "item_type": "Room",
+                        "description": f"Room {r['room_number']} ({days} days)",
+                        "quantity": days,
+                        "unit_price": float(r["daily_charge"])
+                    })
+
+                # ---------- EXTRA ----------
+                items.extend(extra_items)
+
+                if not items:
+                    show_snack("No bill items", ft.Colors.RED)
+                    return
+
+                # =========================
+                # PREVIEW
+                # =========================
+                preview_area.controls.clear()
+                total = 0
+
+                for item in items:
+                    item_total = item["quantity"] * item["unit_price"]
+                    total += item_total
+
+                    preview_area.controls.append(
+                        ft.Text(
+                            f"{item['description']} | Qty {item['quantity']} | ₹{item['unit_price']} | Total ₹{item_total}"
+                        )
+                    )
+
+                preview_area.controls.append(
+                    ft.Text(f"Grand Total: ₹{total}", weight="bold", size=16)
+                )
+
+                page.update()
+
+                # =========================
+                # SAVE INVOICE
+                # =========================
+                try:
+                    invoice_id = save_invoice_record(
+                        patient_id=patient_id,
+                        bill_type=bill_type,
+                        items=items,
+                        collect_now=collect_now_sw.value,
+                        payment_mode=payment_mode_dd.value,
+                        notes=f"{bill_type} bill",
+                        consultation_id=consultation_id,
+                        lab_order_id=lab_order_id,
+                        admission_id=admission_id
+                    )
+
+                    if invoice_id:
+                        show_snack(f"Invoice Created ID: {invoice_id}", ft.Colors.GREEN)
+                        nav_to("billing")
+
+                except Exception as ex:
+                    show_snack(f"Error: {ex}", ft.Colors.RED)
+
+            # =========================
+            # UI
+            # =========================
+            content_controls.append(
+                ft.Container(
+                    padding=16,
+                    border_radius=12,
+                    bgcolor=ft.Colors.WHITE,
+                    content=ft.Column([
+                        ft.Row([bill_type_dd, source_dd], spacing=12),
+                        ft.Row([collect_now_sw, payment_mode_dd], spacing=12),
+                        ft.Row([extra_desc, extra_qty, extra_rate], spacing=12),
+
+                        ft.Row([
+                            ft.FilledButton("Load Sources", on_click=load_sources),
+                            ft.FilledButton("Add Extra Charge", on_click=add_extra_charge),
+                            ft.FilledButton("Generate Bill", on_click=generate_bill),
+                        ], spacing=12),
+
+                        ft.Divider(),
+                        ft.Text("Preview", weight="bold"),
+                        preview_area
+                    ], spacing=12)
+                )
+            )
         # =====================================================================
         # 5.4. MODULE: STAFF MANAGEMENT (THE BULLETPROOF UI FIX)
         # =====================================================================
@@ -2484,6 +4029,290 @@ def main(page: ft.Page):
         # =====================================================================
         # 5.7. MODULE: PATIENT MASTER DIRECTORY
         # =====================================================================
+        elif tab == "patient_billing":
+            pid = page.session.store.get("patient_id")
+            bills = get_query_data("""
+                SELECT
+                    invoice_number, bill_type, invoice_date,
+                    subtotal, total_amount, paid_amount, due_amount,
+                    payment_status, payment_mode, notes
+                FROM Invoice
+                WHERE patient_id = %s
+                ORDER BY invoice_date DESC
+            """, (pid,))
+
+            content_controls.append(ft.Text("Bills & Payments", size=20, weight="bold"))
+
+            if bills:
+                for b in bills:
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.GREY_100,
+                            content=ft.Column([
+                                ft.Text(f"{b['invoice_number']} | {b.get('bill_type') or 'N/A'}", weight="bold"),
+                                ft.Text(f"Date: {fmt_dt(b.get('invoice_date'))}"),
+                                ft.Text(f"Subtotal: ₹{b.get('subtotal') or 0} | Total: ₹{b.get('total_amount') or 0}"),
+                                ft.Text(f"Paid: ₹{b.get('paid_amount') or 0} | Due: ₹{b.get('due_amount') or 0}"),
+                                ft.Text(f"Status: {b.get('payment_status') or 'N/A'} | Mode: {b.get('payment_mode') or 'N/A'}"),
+                                ft.Text(f"Notes: {b.get('notes') or 'N/A'}"),
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No bills found"))
+
+        elif tab == "patient_lab_results":
+            pid = page.session.store.get("patient_id")
+            results = get_query_data("""
+                SELECT
+                    lr.result_value,
+                    lr.unit,
+                    lr.normal_range,
+                    lr.status,
+                    lr.remarks,
+                    lr.reported_at,
+                    t.test_name
+                FROM LabResult lr
+                JOIN LabOrderItem loi ON lr.order_item_id = loi.order_item_id
+                JOIN LabOrder lo ON loi.order_id = lo.order_id
+                JOIN LabTest t ON loi.test_id = t.test_id
+                WHERE lo.patient_id = %s
+                ORDER BY lr.reported_at DESC
+            """, (pid,))
+
+            content_controls.append(ft.Text("Lab Results", size=20, weight="bold"))
+
+            if results:
+                for r in results:
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(r.get("test_name") or "N/A", weight="bold"),
+                                ft.Text(f"Result: {r.get('result_value') or 'N/A'} {r.get('unit') or ''}"),
+                                ft.Text(f"Normal Range: {r.get('normal_range') or 'N/A'}"),
+                                ft.Text(f"Status: {r.get('status') or 'N/A'}"),
+                                ft.Text(f"Reported: {fmt_dt(r.get('reported_at'))}"),
+                                ft.Text(f"Remarks: {r.get('remarks') or 'N/A'}"),
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No lab results available"))
+
+        elif tab == "patient_allergies":
+            pid = page.session.store.get("patient_id")
+            allergies = get_query_data("""
+                SELECT allergen, reaction, severity
+                FROM Allergy
+                WHERE patient_id = %s
+                ORDER BY severity
+            """, (pid,))
+
+            content_controls.append(ft.Text("Allergies", size=20, weight="bold"))
+
+            if allergies:
+                for a in allergies:
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(a.get("allergen") or "N/A", weight="bold"),
+                                ft.Text(f"Reaction: {a.get('reaction') or 'N/A'}"),
+                                ft.Text(f"Severity: {a.get('severity') or 'N/A'}"),
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No allergies recorded"))
+
+        elif tab == "patient_history":
+            pid = page.session.store.get("patient_id")
+            history = get_query_data("""
+                SELECT condition_name, diagnosed_date, status, notes
+                FROM MedicalHistory
+                WHERE patient_id = %s
+                ORDER BY diagnosed_date DESC
+            """, (pid,))
+
+            content_controls.append(ft.Text("Medical History", size=20, weight="bold"))
+
+            if history:
+                for h in history:
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.WHITE,
+                            content=ft.Column([
+                                ft.Text(h.get("condition_name") or "N/A", weight="bold"),
+                                ft.Text(f"Diagnosed: {h.get('diagnosed_date') or 'N/A'}"),
+                                ft.Text(f"Status: {h.get('status') or 'N/A'}"),
+                                ft.Text(f"Notes: {h.get('notes') or 'N/A'}"),
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No medical history available")) 
+        elif tab == "patient_appointments":
+            pid = page.session.store.get("patient_id")
+            appts = get_query_data("""
+                SELECT
+                    a.appointment_id,
+                    a.appointment_date,
+                    a.appointment_time,
+                    a.token_number,
+                    a.reason,
+                    a.type,
+                    a.status,
+                    d.first_name AS doctor_first,
+                    d.last_name AS doctor_last
+                FROM Appointment a
+                JOIN Doctor d ON a.doctor_id = d.doctor_id
+                WHERE a.patient_id = %s
+                ORDER BY a.appointment_date DESC, a.appointment_time DESC
+            """, (pid,))
+
+            content_controls.append(ft.Text("Appointments", size=20, weight="bold"))
+
+            if appts:
+                for a in appts:
+                    content_controls.append(
+                        ft.Container(
+                            margin=ft.Margin.only(bottom=12),
+                            padding=14,
+                            border_radius=12,
+                            bgcolor=ft.Colors.GREY_100,
+                            content=ft.Column([
+                                ft.Text(f"Appointment #{a['appointment_id']}", weight="bold"),
+                                ft.Text(f"Dr. {a['doctor_first']} {a['doctor_last']}"),
+                                ft.Text(f"Date: {a['appointment_date']} | Time: {a['appointment_time']} | Token: {a.get('token_number') or 'N/A'}"),
+                                ft.Text(f"Type: {a.get('type') or 'N/A'} | Status: {a.get('status') or 'N/A'}"),
+                                ft.Text(f"Reason: {a.get('reason') or 'N/A'}"),
+                            ])
+                        )
+                    )
+            else:
+                content_controls.append(ft.Text("No appointments found"))
+        elif tab == "patient_profile":
+            pid = page.session.store.get("patient_id")
+            patient = get_query_data("""
+                SELECT p.*, u.username, u.email AS login_email
+                FROM Patient p
+                LEFT JOIN Users u ON p.user_id = u.user_id
+                WHERE p.patient_id = %s
+            """, (pid,))
+
+            if not patient:
+                content_controls.append(ft.Text("Patient not found"))
+                return
+
+            p = patient[0]
+
+            content_controls.append(ft.Text("My Profile", size=20, weight="bold"))
+            content_controls.append(
+                ft.Container(
+                    padding=14,
+                    border_radius=12,
+                    bgcolor=ft.Colors.WHITE,
+                    content=ft.Column([
+                        ft.Text(f"Name: {p['first_name']} {p['last_name']}", weight="bold"),
+                        ft.Text(f"Username: {p.get('username') or 'N/A'}"),
+                        ft.Text(
+                            f"Registered By: {p.get('reg_first_name') or 'N/A'} {p.get('reg_last_name') or ''} "
+                            f"(ID: {p.get('reg_id') or 'N/A'})"
+                        ),
+                        ft.Text(f"Email: {p.get('login_email') or p.get('email') or 'N/A'}"),
+                        ft.Text(f"Gender: {p.get('gender') or 'N/A'}"),
+                        ft.Text(f"DOB: {p.get('date_of_birth') or 'N/A'}"),
+                        ft.Text(f"Blood Group: {p.get('blood_group') or 'N/A'}"),
+                        ft.Text(f"Phone: {p.get('phone') or 'N/A'}"),
+                        ft.Text(f"Address: {p.get('address') or 'N/A'}"),
+                        ft.Text(f"City: {p.get('city') or 'N/A'} | State: {p.get('state') or 'N/A'} | Pincode: {p.get('pincode') or 'N/A'}"),
+                        ft.Text(f"Emergency Contact: {p.get('emergency_contact_name') or 'N/A'} | {p.get('emergency_contact_phone') or 'N/A'}"),
+                        ft.Text(f"Insurance: {p.get('insurance_provider') or 'N/A'} | Policy: {p.get('insurance_policy_no') or 'N/A'}"),
+                    ], spacing=8)
+                )
+            )
+    
+        elif tab == "patient_dashboard":
+            pid = page.session.store.get("patient_id")
+            if not pid:
+                content_controls.append(ft.Text("No patient session found. Please log in again."))
+                return
+
+            p = get_query_data("""
+                SELECT 
+                    p.*,
+                    u.username,
+                    r.receptionist_id AS reg_id,
+                    r.first_name AS reg_first_name,
+                    r.last_name AS reg_last_name
+                FROM Patient p
+                LEFT JOIN Users u ON p.user_id = u.user_id
+                LEFT JOIN Receptionist r ON p.registered_by = r.receptionist_id
+                WHERE p.patient_id = %s
+            """, (pid,))
+
+            if not p:
+                content_controls.append(ft.Text("Patient record not found"))
+                return
+
+            p = p[0]
+
+            appt_count = get_query_data("SELECT COUNT(*) AS c FROM Appointment WHERE patient_id=%s", (pid,))
+            hist_count = get_query_data("SELECT COUNT(*) AS c FROM MedicalHistory WHERE patient_id=%s", (pid,))
+            allergy_count = get_query_data("SELECT COUNT(*) AS c FROM Allergy WHERE patient_id=%s", (pid,))
+            bill_count = get_query_data("SELECT COUNT(*) AS c FROM Invoice WHERE patient_id=%s", (pid,))
+
+            content_controls.append(
+                ft.Container(
+                    padding=16,
+                    border_radius=12,
+                    bgcolor=ft.Colors.BLUE_50,
+                    content=ft.Column([
+                        ft.Text(f"Welcome, {p['first_name']} {p['last_name']}", size=24, weight="bold"),
+                        ft.Text(f"Patient ID: {p['patient_id']} | Reg No: {p['registration_no']}"),
+                        ft.Text(f"Username: {p.get('username') or 'N/A'}"),
+                        ft.Text(
+                            f"Registered By: {p.get('reg_first_name') or 'N/A'} {p.get('reg_last_name') or ''} "
+                            f"(ID: {p.get('reg_id') or 'N/A'})"
+                        ),
+                        ft.Text(f"Blood Group: {p.get('blood_group') or 'N/A'} | Phone: {p.get('phone') or 'N/A'}"),
+                        ft.Row([
+                            ft.Container(padding=12, bgcolor=ft.Colors.WHITE, border_radius=10,
+                                        content=ft.Text(f"Appointments: {appt_count[0]['c'] if appt_count else 0}")),
+                            ft.Container(padding=12, bgcolor=ft.Colors.WHITE, border_radius=10,
+                                        content=ft.Text(f"Medical History: {hist_count[0]['c'] if hist_count else 0}")),
+                            ft.Container(padding=12, bgcolor=ft.Colors.WHITE, border_radius=10,
+                                        content=ft.Text(f"Allergies: {allergy_count[0]['c'] if allergy_count else 0}")),
+                            ft.Container(padding=12, bgcolor=ft.Colors.WHITE, border_radius=10,
+                                        content=ft.Text(f"Bills: {bill_count[0]['c'] if bill_count else 0}")),
+                        ], spacing=12)
+                    ])
+                )
+            )
+
+            content_controls.append(
+                ft.Row([
+                    ft.FilledButton("My Profile", on_click=lambda e: nav_to("patient_profile")),
+                    ft.FilledButton("Appointments", on_click=lambda e: nav_to("patient_appointments")),
+                    ft.FilledButton("Medical History", on_click=lambda e: nav_to("patient_history")),
+                    ft.FilledButton("Allergies", on_click=lambda e: nav_to("patient_allergies")),
+                    ft.FilledButton("Lab Results", on_click=lambda e: nav_to("patient_lab_results")),
+                    ft.FilledButton("Bills", on_click=lambda e: nav_to("patient_billing")),
+                ], spacing=10)
+            )
         elif tab == "patients":
             def open_patient_profile(p):
                 patient_dlg = ft.AlertDialog(
@@ -2561,7 +4390,7 @@ def main(page: ft.Page):
                         rows=p_rows
                     )
                 ])
-
+        
         # =====================================================================
         # 5.8. MODULE: APPOINTMENTS & SCHEDULING
         # =====================================================================
