@@ -1,4 +1,4 @@
--- Active: 1772286975086@@127.0.0.1@3306@hospital
+-- Active: 1776310568102@@127.0.0.1@3306@hospital
 create DATABASE hospital;
 USE hospital; 
 
@@ -485,3 +485,27 @@ CREATE TABLE AuditLog (
     logged_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES Users(user_id)
 );
+ALTER TABLE Invoice
+MODIFY invoice_number VARCHAR(50);
+use hospital;
+ALTER TABLE Invoice
+  ADD COLUMN bill_type ENUM('OPD','LAB','PHARMACY','IPD') NOT NULL DEFAULT 'OPD',
+  ADD COLUMN status ENUM('Draft','Issued','Partially Paid','Paid','Cancelled') NOT NULL DEFAULT 'Issued',
+  ADD COLUMN consultation_id INT NULL,
+  ADD COLUMN lab_order_id INT NULL,
+  ADD COLUMN dispense_id INT NULL;
+
+ALTER TABLE Invoice
+  ADD CONSTRAINT fk_invoice_consultation
+  FOREIGN KEY (consultation_id) REFERENCES Consultation(consultation_id);
+
+ALTER TABLE Invoice
+  ADD CONSTRAINT fk_invoice_lab_order
+  FOREIGN KEY (lab_order_id) REFERENCES LabOrder(order_id);
+
+ALTER TABLE Invoice
+  ADD CONSTRAINT fk_invoice_dispense
+  FOREIGN KEY (dispense_id) REFERENCES PharmacyDispense(dispense_id);
+
+use hospital;
+SELECT bill_type FROM Invoice;
