@@ -3,6 +3,8 @@
 
 CREATE DATABASE IF NOT EXISTS hospital;
 USE hospital;
+USE hospital;
+
 
 SET FOREIGN_KEY_CHECKS = 0;
 SET SQL_MODE = '';
@@ -403,7 +405,7 @@ INSERT INTO Prescription (prescription_id, consultation_id, patient_id, doctor_i
 (6, 7, 2,  2, '2024-04-05 10:30:00', '2024-07-05', 'Verapamil to be taken at night. Avoid alcohol.'),
 (7, 8, 1,  1, '2024-04-11 09:35:00', '2024-07-11', 'HbA1c and Lipid profile after 3 months. Continue current medications.');
 
-INSERT INTO PrescriptionItem (item_id, prescription_id, medicine_id, dosage, frequency, duration_days, route, instructions) VALUES
+INSERT INTO  ionItem (item_id, prescription_id, medicine_id, dosage, frequency, duration_days, route, instructions) VALUES
 -- Prescription 1: Patient 1, Hypertension + DM
 (1,  1, 7,  '1 tablet',   'Once daily (OD)',      30,  'Oral', 'Morning, before breakfast'),
 (2,  1, 8,  '1 tablet',   'Once daily (OD)',      30,  'Oral', 'Morning, with food'),
@@ -720,7 +722,73 @@ INSERT INTO AuditLog (log_id, user_id, action, table_name, record_id, old_values
 (14, 2,  'UPDATE', 'Patient',     5,    '{"status":"Active"}',                       '{"status":"Admitted"}',                                  '192.168.1.10', '2024-04-03 14:35:00'),
 (15, 1,  'DELETE', 'StaffSchedule',4,   '{"user_id":9,"date":"2024-04-10","status":"Scheduled"}', NULL,                                        '192.168.1.10', '2024-04-10 18:00:00');
 
+
+-- OPD invoices
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 1,
+    dispense_id = 1
+WHERE invoice_id = 1;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 2,
+    dispense_id = 2
+WHERE invoice_id = 2;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 3,
+    dispense_id = 3
+WHERE invoice_id = 3;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Partially Paid',
+    consultation_id = 4,
+    dispense_id = 4
+WHERE invoice_id = 4;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Paid',
+    consultation_id = 5,
+    dispense_id = 5
+WHERE invoice_id = 7;
+
+UPDATE Invoice
+SET bill_type = 'OPD',
+    status = 'Issued',
+    consultation_id = 8,
+    dispense_id = NULL
+WHERE invoice_id = 9;
+
+-- IPD invoices
+UPDATE Invoice
+SET bill_type = 'IPD',
+    status = 'Partially Paid',
+    consultation_id = 6,
+    dispense_id = NULL
+WHERE invoice_id = 5;
+
+UPDATE Invoice
+SET bill_type = 'IPD',
+    status = 'Paid',
+    consultation_id = NULL,
+    dispense_id = NULL
+WHERE invoice_id = 6;
+
+UPDATE Invoice
+SET bill_type = 'IPD',
+    status = 'Paid',
+    consultation_id = NULL,
+    dispense_id = NULL
+WHERE invoice_id = 8;
 -- ─────────────────────────────────────────────
 -- RE-ENABLE FK CHECKS
 -- ─────────────────────────────────────────────
+;     -- Aspirin
 SET FOREIGN_KEY_CHECKS = 1;
