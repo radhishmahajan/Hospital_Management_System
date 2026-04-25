@@ -1414,36 +1414,52 @@ def main(page: ft.Page):
             admission_id = ft.Dropdown(label="Admission ID", width=300)
             notes = ft.TextField(label="Discharge Notes")
 
+            admissions = get_query_data("""
+                SELECT admission_id 
+                FROM Admission 
+                WHERE status = 'Admitted'
+            """)
+
+            admission_id = ft.Dropdown(
+                label="Admission ID",
+                width=300,
+                options=[
+                    ft.dropdown.Option(str(a["admission_id"]))
+                    for a in admissions
+                ]
+            )
+
+            notes = ft.TextField(label="Discharge Notes")
+
             def discharge(e):
+                if not admission_id.value:
+                    show_snack("Select admission first", ft.Colors.RED)
+                    return
+
+                aid = int(admission_id.value)
+
                 conn = get_db_connection()
                 cursor = conn.cursor()
 
-                # ✅ STEP 1: CHECK BILL FIRST
                 cursor.execute("""
-                SELECT due_amount FROM Invoice WHERE admission_id=%s
-                """, (admission_id.value,))
+                    SELECT due_amount FROM Invoice WHERE admission_id=%s
+                """, (aid,))
 
                 data = cursor.fetchone()
 
                 if data and float(data[0]) > 0:
                     show_snack("Clear pending bill before discharge", ft.Colors.RED)
-                    cursor.close()
-                    conn.close()
                     return
 
-                # ✅ STEP 2: ALLOW DISCHARGE
                 cursor.execute("""
-                UPDATE Admission
-                SET status='Discharged',
-                    discharge_date=NOW(),
-                    discharge_notes=%s
-                WHERE admission_id=%s
-                """, (notes.value, admission_id.value))
+                    UPDATE Admission
+                    SET status='Discharged',
+                        discharge_date=NOW(),
+                        discharge_notes=%s
+                    WHERE admission_id=%s
+                """, (notes.value, aid))
 
                 conn.commit()
-                cursor.close()
-                conn.close()
-
                 show_snack("Patient discharged successfully", ft.Colors.GREEN)
 
             content_controls.append(
