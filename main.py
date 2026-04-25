@@ -967,7 +967,7 @@ def main(page: ft.Page):
             ]
 
         elif role == "Lab Technician":
-            sidebar_bg = "#0F766E"
+            sidebar_bg = "#004D40"
             sidebar_controls = [
                 ft.Text("LAB PANEL", size=22, weight="bold", color="white"),
                 ft.Divider(color="white24"),
@@ -1007,7 +1007,7 @@ def main(page: ft.Page):
             ]
 
         elif role == "Pharmacist":
-            sidebar_bg = "#0F766E"
+            sidebar_bg = "#004D40"
             sidebar_controls = [
                 ft.Text("PHARMACY PANEL", color="white", weight="bold", size=20),
                 ft.Divider(color="white24"),
@@ -1078,7 +1078,7 @@ def main(page: ft.Page):
             ]
 
         elif role == "Patient":
-            sidebar_bg = "#0F766E"
+            sidebar_bg = "#004D40"
             sidebar_controls = [
                 ft.Text("PATIENT PORTAL", color="white", weight="bold", size=20),
                 ft.Divider(color="white24"),
@@ -1149,13 +1149,13 @@ def main(page: ft.Page):
                             ft.Icon(
                                 ft.Icons.LOCAL_HOSPITAL, 
                                 size=45, 
-                                color=ft.Colors.BLUE_900 if role == "Admin" else ft.Colors.TEAL_700
+                                color="#004D40" if role == "Admin" else "#004D40"
                             ),
                             ft.Text(
                                 "MR HOSPITALS", 
                                 size=32, 
                                 weight="w900", 
-                                color=ft.Colors.BLUE_900 if role == "Admin" else ft.Colors.TEAL_900
+                                color="#004D40" if role == "Admin" else "#004D40"
                             )
                         ]
                     ),
@@ -1185,7 +1185,7 @@ def main(page: ft.Page):
         # =====================================================================
         if tab == "admin_overview":
             banner = ft.Container(
-                bgcolor=ft.Colors.BLUE_900, 
+                bgcolor="#004D40", 
                 padding=40, 
                 border_radius=15, 
                 margin=ft.Margin.only(),
@@ -1262,7 +1262,7 @@ def main(page: ft.Page):
                     content_controls.append(
                         ft.Container(
                             padding=10,
-                            bgcolor=ft.Colors.BLUE_50,
+                            bgcolor="#F0FDFA",
                             content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
                         )
                     )
@@ -1284,6 +1284,7 @@ def main(page: ft.Page):
                         ft.DataCell(
                             ft.TextButton(
                                 f"{a['first_name']} {a['last_name']}",
+                                style=ft.ButtonStyle(color="#0F766E"),
                                 on_click=lambda e, pid=a['patient_id']: (
                                     page.session.store.set("selected_patient_id", pid),
                                     nav_to("doctor_patient")
@@ -1320,7 +1321,7 @@ def main(page: ft.Page):
                     content_controls.append(
                         ft.Container(
                             padding=10,
-                            bgcolor=ft.Colors.BLUE_50,
+                            bgcolor="#F0FDFA",
                             content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
                         )
                     )
@@ -1356,7 +1357,7 @@ def main(page: ft.Page):
                 content_controls.append(
                     ft.Container(
                         padding=10,
-                        bgcolor=ft.Colors.BLUE_50,
+                        bgcolor="#F0FDFA",
                         content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
                     )
                 )
@@ -1391,7 +1392,7 @@ def main(page: ft.Page):
                         chief,
                         symptoms,
                         diagnosis,
-                        ft.FilledButton("Save Consultation", on_click=save_consult)
+                        ft.FilledButton("Save Consultation", on_click=save_consult, bgcolor="#0F766E", color="white")
                     ])
                 )
             )
@@ -1406,7 +1407,7 @@ def main(page: ft.Page):
                     content_controls.append(
                         ft.Container(
                             padding=10,
-                            bgcolor=ft.Colors.BLUE_50,
+                            bgcolor="#F0FDFA",
                             content=ft.Text(f"Current Patient: {p[0]['first_name']} {p[0]['last_name']}")
                         )
                     )
@@ -1449,7 +1450,7 @@ def main(page: ft.Page):
                 ft.Column([
                     admission_id,
                     notes,
-                    ft.FilledButton("Discharge Patient", on_click=discharge)
+                    ft.FilledButton("Discharge Patient",bgcolor="#0F766E", color="white", on_click=discharge)
                 ])
             ) 
         elif tab == "doctor_patient":
@@ -1474,7 +1475,7 @@ def main(page: ft.Page):
                 content_controls.append(
                     ft.Container(
                         padding=10,
-                        bgcolor=ft.Colors.BLUE_50,
+                        bgcolor="#F0FDFA",
                         content=ft.Text(f"Current Patient: {patient_banner[0]['first_name']} {patient_banner[0]['last_name']}")
                     )
                 )
@@ -1523,7 +1524,7 @@ def main(page: ft.Page):
                         ft.Container(
                             padding=10,
                             border_radius=8,
-                            bgcolor=ft.Colors.GREY_100,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(f"{h.get('condition_name')} | {h.get('status')}"),
                                 ft.Text(f"Diagnosed: {h.get('diagnosed_date')}"),
@@ -1620,7 +1621,7 @@ def main(page: ft.Page):
                         diagnosed_date,
                         hist_status,
                         hist_notes,
-                        ft.FilledButton("Save", on_click=save_history)
+                        ft.FilledButton("Save", on_click=save_history, bgcolor="#0F766E", color="white")
                     ])
                 )
             )
@@ -1669,7 +1670,7 @@ def main(page: ft.Page):
                         height,
                         sugar,
                         vitals_notes,
-                        ft.FilledButton("Save Vitals", on_click=save_vitals)
+                        ft.FilledButton("Save Vitals", on_click=save_vitals, bgcolor="#0F766E", color="white")
                     ])
                 )
             )
@@ -1702,7 +1703,7 @@ def main(page: ft.Page):
                     content_controls.append(
                         ft.Container(
                             padding=10,
-                            bgcolor=ft.Colors.BLUE_50,
+                            bgcolor="#F0FDFA",
                             content=ft.Text(
                                 f"Current Patient: {patient_data[0]['first_name']} {patient_data[0]['last_name']}"
                             )
@@ -1807,7 +1808,7 @@ def main(page: ft.Page):
                             freq,
                             duration,
 
-                            ft.FilledButton("Add Prescription", on_click=prescribe)
+                            ft.FilledButton("Add Prescription", bgcolor="#0F766E", color="white", on_click=prescribe)
                         ]
                     )
                 )
@@ -1838,7 +1839,7 @@ def main(page: ft.Page):
                             padding=12,
                             margin=ft.Margin.only(bottom=10),
                             border_radius=10,
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(f"Order #{r['order_id']} - {r['first_name']} {r['last_name']}", weight="bold"),
                                 ft.Text(f"Date: {r['ordered_at']}", size=12),
@@ -1869,7 +1870,7 @@ def main(page: ft.Page):
                     margin=ft.Margin.only(bottom=12),
                     padding=16,
                     border_radius=12,
-                    bgcolor=ft.Colors.BLUE_50,
+                    bgcolor="#F0FDFA",
                     content=ft.Column([
                         ft.Text("Lab Technician Dashboard", size=24, weight="bold"),
                         ft.Text("Tests, orders, results, and history in one workspace."),
@@ -1925,10 +1926,10 @@ def main(page: ft.Page):
             content_controls.append(
                 ft.Row(
                     controls=[
-                        ft.FilledButton("Test Catalog", on_click=lambda e: nav_to("lab_catalog")),
-                        ft.FilledButton("Lab Orders", on_click=lambda e: nav_to("lab_orders")),
-                        ft.FilledButton("Enter Result", on_click=lambda e: nav_to("lab_enter_result")),
-                        ft.FilledButton("Result History", on_click=lambda e: nav_to("lab_history")),
+                        ft.FilledButton("Test Catalog", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("lab_catalog")),
+                        ft.FilledButton("Lab Orders", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("lab_orders")),
+                        ft.FilledButton("Enter Result", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("lab_enter_result")),
+                        ft.FilledButton("Result History", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("lab_history")),
                     ],
                     spacing=12
                 )
@@ -1970,7 +1971,7 @@ def main(page: ft.Page):
                                 margin=ft.Margin.only(bottom=8),
                                 padding=12,
                                 border_radius=10,
-                                bgcolor=ft.Colors.GREY_100,
+                                bgcolor="#F0FDFA",
                                 content=ft.Column([
                                     ft.Text(f"{t['test_name']} ({t.get('test_code') or 'No code'})", weight="bold"),
                                     ft.Text(f"Sample: {t.get('sample_type') or 'N/A'} | Volume: {t.get('sample_volume') or 'N/A'}"),
@@ -2085,6 +2086,7 @@ def main(page: ft.Page):
                                         status_dd,
                                         ft.FilledButton(
                                             "Save Status",
+                                            bgcolor="#0F766E", color=ft.Colors.WHITE,
                                             on_click=lambda e, oid=o["order_id"], dd=status_dd: update_order_status(oid, dd.value)
                                         )
                                     ],
@@ -2232,7 +2234,7 @@ def main(page: ft.Page):
                         ft.Row([result_value, result_unit, result_normal_range], spacing=12),
                         ft.Row([result_status, verified_by], spacing=12),
                         result_remarks,
-                        ft.FilledButton("Submit Lab Result", on_click=submit_result)
+                        ft.FilledButton("Submit Lab Result", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=submit_result)
                     ], spacing=12)
                 )
             ) 
@@ -2325,7 +2327,7 @@ def main(page: ft.Page):
                 ft.Container(
                     padding=16,
                     border_radius=12,
-                    bgcolor=ft.Colors.TEAL_50,
+                    bgcolor="#F0FDFA",
                     content=ft.Column([
                         ft.Text("Pharmacy Dashboard", size=24, weight="bold"),
                         ft.Text("Inventory, prescriptions, dispensing, invoices, and sales in one place."),
@@ -2401,11 +2403,11 @@ def main(page: ft.Page):
             content_controls.append(
                 ft.Row(
                     controls=[
-                        ft.FilledButton("Inventory", on_click=lambda e: nav_to("pharma_inventory")),
-                        ft.FilledButton("Prescriptions", on_click=lambda e: nav_to("pharma_prescriptions")),
-                        ft.FilledButton("Dispense", on_click=lambda e: nav_to("pharma_dispense")),
-                        ft.FilledButton("Invoices", on_click=lambda e: nav_to("pharma_invoice")),
-                        ft.FilledButton("Sales", on_click=lambda e: nav_to("pharma_sales")),
+                        ft.FilledButton("Inventory", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("pharma_inventory")),
+                        ft.FilledButton("Prescriptions", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("pharma_prescriptions")),
+                        ft.FilledButton("Dispense", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("pharma_dispense")),
+                        ft.FilledButton("Invoices", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("pharma_invoice")),
+                        ft.FilledButton("Sales", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("pharma_sales")),
                     ],
                     spacing=12
                 )
@@ -2531,7 +2533,7 @@ def main(page: ft.Page):
                         ft.Container(
                             padding=12,
                             margin=ft.Margin.only(bottom=10),
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             border_radius=10,
                             content=ft.Column([
                                 ft.Text(f"{inv['invoice_number']}", weight="bold"),
@@ -2544,6 +2546,7 @@ def main(page: ft.Page):
                                     mode_dd,
                                     ft.FilledButton(
                                         "Mark Paid",
+                                        bgcolor="#0F766E", color=ft.Colors.WHITE,
                                         on_click=lambda e, iid=inv["invoice_id"], dd=mode_dd:
                                             mark_invoice_paid(iid, dd.value)
                                     )
@@ -2587,7 +2590,7 @@ def main(page: ft.Page):
                 ]
             )
 
-            collect_now_sw = ft.Switch(label="Collect Payment Now", value=True)
+            collect_now_sw = ft.Switch(label="Collect Payment Now", value=True, active_color="#0F766E")
 
             payment_mode_dd = ft.Dropdown(
                 label="Payment Mode",
@@ -2731,8 +2734,8 @@ def main(page: ft.Page):
                         dispense_dd,
                         ft.Row([collect_now_sw, payment_mode_dd], spacing=12),
                         ft.Row([
-                            ft.FilledButton("Load Preview", on_click=load_dispense_preview),
-                            ft.FilledButton("Generate Invoice", on_click=generate_pharmacy_invoice)
+                            ft.FilledButton("Load Preview", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=load_dispense_preview),
+                            ft.FilledButton("Generate Invoice", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=generate_pharmacy_invoice)
                         ], spacing=12),
                         ft.Divider(),
                         ft.Text("Preview", weight="bold"),
@@ -2923,8 +2926,8 @@ def main(page: ft.Page):
                     content=ft.Column([
                         prescription_dd,
                         ft.Row([
-                            ft.FilledButton("Load Prescription Items", on_click=load_items),
-                            ft.FilledButton("Save Dispense", on_click=save_dispense)
+                            ft.FilledButton("Load Prescription Items", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=load_items),
+                            ft.FilledButton("Save Dispense", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=save_dispense)
                         ], spacing=12),
                         items_area
                     ], spacing=12)
@@ -2959,7 +2962,7 @@ def main(page: ft.Page):
                             margin=ft.Margin.only(bottom=12),
                             padding=14,
                             border_radius=12,
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(f"{p['first_name']} {p['last_name']}", size=16, weight="bold"),
                                 ft.Text(f"Prescription ID: {p['prescription_id']}"),
@@ -2969,6 +2972,8 @@ def main(page: ft.Page):
                                 ft.Text(f"Notes: {p.get('notes') or 'N/A'}"),
                                 ft.FilledButton(
                                     "Open in Dispense",
+                                    bgcolor="#0F766E",
+                                    color=ft.Colors.WHITE,
                                     on_click=lambda e, pid=p["prescription_id"]: (
                                         page.session.store.set("selected_prescription_id", pid),
                                         nav_to("pharma_dispense")
@@ -3047,7 +3052,7 @@ def main(page: ft.Page):
                         ft.Container(
                             padding=12,
                             margin=ft.Margin.only(bottom=10),
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             border_radius=10,
                             content=ft.Column([
                                 ft.Text(f"{inv['invoice_number']} | {inv['bill_type']}", weight="bold"),
@@ -3059,6 +3064,8 @@ def main(page: ft.Page):
                                     mode_dd,
                                     ft.FilledButton(
                                         "Mark Paid",
+                                        bgcolor="#0F766E",
+                                        color="white",
                                         on_click=lambda e, iid=inv["invoice_id"], dd=mode_dd:
                                             mark_invoice_paid(iid, dd.value)
                                     )
@@ -3071,7 +3078,7 @@ def main(page: ft.Page):
 
         elif tab == "rec_overview":
             banner = ft.Container(
-                bgcolor=ft.Colors.TEAL_700, 
+                bgcolor="#004D40", 
                 padding=40, 
                 border_radius=15, 
                 margin= ft.Margin.only(bottom=20),
@@ -3194,7 +3201,8 @@ def main(page: ft.Page):
 
             collect_now_sw = ft.Switch(
                 label="Collect Payment Now",
-                value=False
+                value=False,
+                active_color="#0F766E"
             )
 
             payment_mode_dd = ft.Dropdown(
@@ -3457,9 +3465,9 @@ def main(page: ft.Page):
                         ft.Row([extra_desc, extra_qty, extra_rate], spacing=12),
 
                         ft.Row([
-                            ft.FilledButton("Load Sources", on_click=load_sources),
-                            ft.FilledButton("Add Extra Charge", on_click=add_extra_charge),
-                            ft.FilledButton("Generate Bill", on_click=generate_bill),
+                            ft.FilledButton("Load Sources", bgcolor="#0F766E", color="white", on_click=load_sources),
+                            ft.FilledButton("Add Extra Charge", bgcolor="#0F766E", color="white", on_click=add_extra_charge),
+                            ft.FilledButton("Generate Bill", bgcolor="#0F766E", color="white", on_click=generate_bill),
                         ], spacing=12),
 
                         ft.Divider(),
@@ -3737,7 +3745,7 @@ def main(page: ft.Page):
                 for s in staff_data:
                     view_btn = ft.IconButton(
                         icon=ft.Icons.VISIBILITY,
-                        icon_color=ft.Colors.BLUE_900,
+                        icon_color="#0F766E",
                         on_click=lambda e, data=s: open_staff_profile(data)
                     )
                     table_rows.append(
@@ -4051,7 +4059,7 @@ def main(page: ft.Page):
                             margin=ft.Margin.only(bottom=12),
                             padding=14,
                             border_radius=12,
-                            bgcolor=ft.Colors.GREY_100,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(f"{b['invoice_number']} | {b.get('bill_type') or 'N/A'}", weight="bold"),
                                 ft.Text(f"Date: {fmt_dt(b.get('invoice_date'))}"),
@@ -4093,7 +4101,7 @@ def main(page: ft.Page):
                             margin=ft.Margin.only(bottom=12),
                             padding=14,
                             border_radius=12,
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(r.get("test_name") or "N/A", weight="bold"),
                                 ft.Text(f"Result: {r.get('result_value') or 'N/A'} {r.get('unit') or ''}"),
@@ -4125,7 +4133,7 @@ def main(page: ft.Page):
                             margin=ft.Margin.only(bottom=12),
                             padding=14,
                             border_radius=12,
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(a.get("allergen") or "N/A", weight="bold"),
                                 ft.Text(f"Reaction: {a.get('reaction') or 'N/A'}"),
@@ -4154,7 +4162,7 @@ def main(page: ft.Page):
                             margin=ft.Margin.only(bottom=12),
                             padding=14,
                             border_radius=12,
-                            bgcolor=ft.Colors.WHITE,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(h.get("condition_name") or "N/A", weight="bold"),
                                 ft.Text(f"Diagnosed: {h.get('diagnosed_date') or 'N/A'}"),
@@ -4193,7 +4201,7 @@ def main(page: ft.Page):
                             margin=ft.Margin.only(bottom=12),
                             padding=14,
                             border_radius=12,
-                            bgcolor=ft.Colors.GREY_100,
+                            bgcolor="#F0FDFA",
                             content=ft.Column([
                                 ft.Text(f"Appointment #{a['appointment_id']}", weight="bold"),
                                 ft.Text(f"Dr. {a['doctor_first']} {a['doctor_last']}"),
@@ -4225,7 +4233,7 @@ def main(page: ft.Page):
                 ft.Container(
                     padding=14,
                     border_radius=12,
-                    bgcolor=ft.Colors.WHITE,
+                    bgcolor="#F0FDFA",
                     content=ft.Column([
                         ft.Text(f"Name: {p['first_name']} {p['last_name']}", weight="bold"),
                         ft.Text(f"Username: {p.get('username') or 'N/A'}"),
@@ -4280,7 +4288,7 @@ def main(page: ft.Page):
                 ft.Container(
                     padding=16,
                     border_radius=12,
-                    bgcolor=ft.Colors.BLUE_50,
+                    bgcolor="#F0FDFA",
                     content=ft.Column([
                         ft.Text(f"Welcome, {p['first_name']} {p['last_name']}", size=24, weight="bold"),
                         ft.Text(f"Patient ID: {p['patient_id']} | Reg No: {p['registration_no']}"),
@@ -4306,18 +4314,18 @@ def main(page: ft.Page):
 
             content_controls.append(
                 ft.Row([
-                    ft.FilledButton("My Profile", on_click=lambda e: nav_to("patient_profile")),
-                    ft.FilledButton("Appointments", on_click=lambda e: nav_to("patient_appointments")),
-                    ft.FilledButton("Medical History", on_click=lambda e: nav_to("patient_history")),
-                    ft.FilledButton("Allergies", on_click=lambda e: nav_to("patient_allergies")),
-                    ft.FilledButton("Lab Results", on_click=lambda e: nav_to("patient_lab_results")),
-                    ft.FilledButton("Bills", on_click=lambda e: nav_to("patient_billing")),
+                    ft.FilledButton("My Profile", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("patient_profile")),
+                    ft.FilledButton("Appointments", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("patient_appointments")),
+                    ft.FilledButton("Medical History", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("patient_history")),
+                    ft.FilledButton("Allergies", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("patient_allergies")),
+                    ft.FilledButton("Lab Results", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("patient_lab_results")),
+                    ft.FilledButton("Bills", bgcolor="#0F766E", color=ft.Colors.WHITE, on_click=lambda e: nav_to("patient_billing")),
                 ], spacing=10)
             )
         elif tab == "patients":
             def open_patient_profile(p):
                 patient_dlg = ft.AlertDialog(
-                    title=ft.Text(f"Comprehensive Profile: {p['first_name']} {p['last_name']}", weight="bold", color=ft.Colors.BLUE_900),
+                    title=ft.Text(f"Comprehensive Profile: {p['first_name']} {p['last_name']}", weight="bold", color="#0F766E"),
                     content=ft.Container(
                         width=650, 
                         content=ft.Column(
@@ -4347,8 +4355,11 @@ def main(page: ft.Page):
                         )
                     ),
                     actions=[
-                        ft.TextButton(
-                            "Close Window", 
+                        ft.OutlinedButton(
+                            "Close Window",
+                            style=ft.ButtonStyle(
+                                color="#0F766E" 
+                            ),
                             on_click=lambda e: setattr(patient_dlg, 'open', False) or page.update()
                         )
                     ]
@@ -4365,7 +4376,7 @@ def main(page: ft.Page):
                 for p in patient_data:
                     eye_btn = ft.IconButton(
                         icon=ft.Icons.VISIBILITY, 
-                        icon_color=ft.Colors.BLUE_900, 
+                        icon_color="#0F766E", 
                         on_click=lambda e, data=p: open_patient_profile(data)
                     )
                     p_rows.append(
