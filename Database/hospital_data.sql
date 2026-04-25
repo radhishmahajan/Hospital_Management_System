@@ -1,6 +1,8 @@
 
 -- HOSPITAL DATABASE 
 
+CREATE DATABASE IF NOT EXISTS hospital;
+USE hospital;
 USE hospital;
 
 
@@ -42,7 +44,7 @@ INSERT INTO Department (dept_id, dept_name, dept_code, floor_number, wing, phone
 -- 3. USERS 
 -- ────────────────────────────────────────────
 INSERT INTO Users (user_id, username, u_password, email, role_id, is_active, last_login, created_at) VALUES
--- Admins
+-- Admins 
 (1,  'admin_suresh',    'admin_suresh123', 'suresh.admin@apollo.com',        1, TRUE, '2024-04-10 08:00:00', '2023-06-01'),
 (2,  'admin_meghna',    'admin_meghna123', 'meghna.admin@apollo.com',        1, TRUE, '2024-04-10 09:00:00', '2023-06-01'),
 -- Receptionists
