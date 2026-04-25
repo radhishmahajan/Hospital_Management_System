@@ -172,7 +172,7 @@ def main(page: ft.Page):
     # Universal UI Button Styles
     admin_btn_style = ft.ButtonStyle(
         color=ft.Colors.WHITE, 
-        bgcolor=ft.Colors.TEAL_700", 
+        bgcolor=ft.Colors.TEAL_700, 
         shape=ft.RoundedRectangleBorder(radius=8)
     )
     
@@ -482,58 +482,59 @@ def main(page: ft.Page):
 
         # ---------------- LEFT SIDE (IMAGE + BRANDING) ----------------
         left_section = ft.Container(
-            expand=True,
-            margin=0,
-            padding=0,
-            content=ft.Stack(
-                expand=True,   # 🔥 IMPORTANT
-                controls=[
-                    # ✅ FULL IMAGE (fills complete left side)
-                    ft.Image(
-                        src="image.jpeg",
-                        fit="cover",
-                        expand=True,
-                    ),
+    expand=True,
+    margin=0,
+    padding=0,
+    content=ft.Column(
+        expand=True,
+        spacing=0,
+        controls=[
 
-                    # ✅ DARK OVERLAY
-                    ft.Container(
-                        expand=True,
-                        bgcolor="#000000",
-                        opacity=0.35
-                    ),
+            # ✅ TOP IMAGE
+            ft.Container(
+                expand=3,   # 🔥 70% space
+                width=float("inf"),
+                content=ft.Image(
+                    src="Image.png",
+                    fit="cover",
+                    expand=True,
+                ),
+            ),
 
-                    # ✅ TEXT (LEFT SIDE POSITIONED LIKE YOUR IMAGE)
-                    ft.Container(
-                        expand=True,
-                        padding=40,
-                        alignment=ft.alignment.Alignment(-1,1),  # 🔥 FIX POSITION
-                        content=ft.Column(
-                            alignment=ft.MainAxisAlignment.END,
-                            horizontal_alignment=ft.CrossAxisAlignment.START,
-                            spacing=5,
-                            controls=[
-                                ft.Text(
-                                    "Welcome to",
-                                    size=20,
-                                    color="white"
-                                ),
-                                ft.Text(
-                                    "MR HOSPITALS",
-                                    size=40,
-                                    weight="bold",
-                                    color="white"
-                                ),
-                                ft.Text(
-                                    "EHR & HMS",
-                                    size=16,
-                                    color="#E2E8F0"
-                                ),
-                            ]
-                        )
-                    )
-                ]
-            )
-        )
+            # ✅ BOTTOM TEAL SECTION
+            ft.Container(
+                expand=2,   # 🔥 30% space
+                width=float("inf"),
+                bgcolor="#38A169",
+                padding=40,
+                content=ft.Column(
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.START,
+                    spacing=10,
+                    controls=[
+                        ft.Text(
+                            "Welcome to",
+                            size=34,
+                            weight="bold",
+                            color="white",
+                        ),
+                        ft.Text(
+                            "MR HOSPITALS",
+                            size=60,
+                            weight="bold",
+                            color="white"
+                        ),
+                        ft.Text(
+                            "Smart Healthcare • EHR • HMS",
+                            size=24,
+                            color="#CCFBF1"
+                        ),
+                    ]
+                )
+            ),
+        ]
+    )
+)
 
         # ---------------- RIGHT SIDE (LOGIN FORM) ----------------
         login_section = ft.Container(
