@@ -1413,37 +1413,78 @@ def main(page: ft.Page):
                     )
             admission_id = ft.Dropdown(label="Admission ID", width=300)
             notes = ft.TextField(label="Discharge Notes")
+            selected_patient_id = pid  
+            admissions = get_query_data("""
+                SELECT a.admission_id, p.first_name, p.last_name,p.registration_no
+                FROM Admission a 
+                JOIN Patient p ON a.patient_id = p.patient_id
+                WHERE a.status = 'Admitted' and p.patient_id = %s
+            """, (selected_patient_id,))
+
+            
+            # admission_id = ft.Dropdown(
+            #     label="Admission ID",
+            #     width=300,
+            #     options=[
+            #         ft.dropdown.Option(
+            #             key=str(a["admission_id"]),
+            #             text=f'{a["admission_id"]} - {a["first_name"]} {a["last_name"]} ({a["registration_no"]})'
+            #         )
+            #         for a in admissions
+            #     ]
+            # )
+            if admissions:
+                options = [
+                    ft.dropdown.Option(
+                        key=str(a["admission_id"]),
+                        text=f'{a["admission_id"]} - {a["first_name"]} {a["last_name"]} ({a["registration_no"]})'
+                    )
+                    for a in admissions
+                ]
+            else:
+                options = [
+                    ft.dropdown.Option(
+                        key="none",
+                        text="No active admission found"
+                    )
+                ]
+
+            admission_id = ft.Dropdown(
+                label="Admission ID",
+                width=350,
+                options=options
+            )
+            notes = ft.TextField(label="Discharge Notes")
 
             def discharge(e):
+                if not admission_id.value:
+                    show_snack("Select admission first", ft.Colors.RED)
+                    return
+
+                aid = int(admission_id.value)
+
                 conn = get_db_connection()
                 cursor = conn.cursor()
 
-                # ✅ STEP 1: CHECK BILL FIRST
                 cursor.execute("""
-                SELECT due_amount FROM Invoice WHERE admission_id=%s
-                """, (admission_id.value,))
+                    SELECT due_amount FROM Invoice WHERE admission_id=%s
+                """, (aid,))
 
                 data = cursor.fetchone()
 
                 if data and float(data[0]) > 0:
                     show_snack("Clear pending bill before discharge", ft.Colors.RED)
-                    cursor.close()
-                    conn.close()
                     return
 
-                # ✅ STEP 2: ALLOW DISCHARGE
                 cursor.execute("""
-                UPDATE Admission
-                SET status='Discharged',
-                    discharge_date=NOW(),
-                    discharge_notes=%s
-                WHERE admission_id=%s
-                """, (notes.value, admission_id.value))
+                    UPDATE Admission
+                    SET status='Discharged',
+                        discharge_date=NOW(),
+                        discharge_notes=%s
+                    WHERE admission_id=%s
+                """, (notes.value, aid))
 
                 conn.commit()
-                cursor.close()
-                conn.close()
-
                 show_snack("Patient discharged successfully", ft.Colors.GREEN)
 
             content_controls.append(
